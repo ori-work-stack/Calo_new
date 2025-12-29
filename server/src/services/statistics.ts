@@ -155,16 +155,9 @@ export class StatisticsService {
         `📅 Date range: ${definedStartDate.toISOString()} to ${definedEndDate.toISOString()}`
       );
 
-      // Get all data in parallel for better performance
-      const [
-        user,
-        meals,
-        dailyGoals,
-        waterIntakes,
-        userAchievements,
-        allAchievements,
-      ] = await Promise.all([
-        // User data with gamification
+      // OPTIMIZED: Fetch data with better indexing and limited queries
+      const [user, meals, dailyGoals, waterIntakes] = await Promise.all([
+        // User data - keep as is
         prisma.user.findUnique({
           where: { user_id: userId },
           select: {
@@ -178,11 +171,11 @@ export class StatisticsService {
           },
         }),
 
-        // Meals in date range
+        // Meals - use upload_time index for better performance
         prisma.meal.findMany({
           where: {
             user_id: userId,
-            created_at: {
+            upload_time: {
               gte: definedStartDate,
               lte: definedEndDate,
             },
@@ -201,10 +194,10 @@ export class StatisticsService {
             liquids_ml: true,
             meal_name: true,
           },
-          orderBy: { created_at: "desc" },
+          orderBy: { upload_time: "desc" },
         }),
 
-        // Daily goals in range
+        // Daily goals - optimized
         prisma.dailyGoal.findMany({
           where: {
             user_id: userId,
@@ -216,7 +209,7 @@ export class StatisticsService {
           orderBy: { date: "desc" },
         }),
 
-        // Water intakes in range
+        // Water intakes - optimized
         prisma.waterIntake.findMany({
           where: {
             user_id: userId,
@@ -232,33 +225,40 @@ export class StatisticsService {
           },
           orderBy: { date: "desc" },
         }),
-
-        // User achievements
-        prisma.userAchievement.findMany({
-          where: { user_id: userId },
-          select: {
-            achievement_id: true,
-            unlocked: true,
-            unlocked_date: true,
-          },
-        }),
-
-        // All achievements
-        prisma.achievement.findMany({
-          select: {
-            id: true,
-            key: true,
-            title: true,
-            description: true,
-            category: true,
-            points_awarded: true,
-            icon: true,
-            rarity: true,
-            max_progress: true,
-          },
-          orderBy: { points_awarded: "asc" },
-        }),
       ]);
+
+      // OPTIMIZED: Load achievements separately only if needed
+      let userAchievements: any[] = [];
+      let allAchievements: any[] = [];
+
+      if (period !== "today") {
+        [userAchievements, allAchievements] = await Promise.all([
+          prisma.userAchievement.findMany({
+            where: { user_id: userId, unlocked: true },
+            select: {
+              achievement_id: true,
+              unlocked: true,
+              unlocked_date: true,
+            },
+            take: 50,
+          }),
+          prisma.achievement.findMany({
+            select: {
+              id: true,
+              key: true,
+              title: true,
+              description: true,
+              category: true,
+              points_awarded: true,
+              icon: true,
+              rarity: true,
+              max_progress: true,
+            },
+            take: 100,
+            orderBy: { points_awarded: "asc" },
+          }),
+        ]);
+      }
 
       console.log(`📊 Data fetched:`, {
         user: !!user,

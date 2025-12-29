@@ -9,7 +9,8 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "clear-cache": "clear-cache.bat"
   },
   "dependencies": {
     "@expo/cli": "^54.0.2",

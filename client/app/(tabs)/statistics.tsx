@@ -1739,7 +1739,7 @@ export default function StatisticsScreen() {
   };
 
   if (isLoading) {
-    return <LoadingScreen text={t("statistics.loading")} />;
+    return <LoadingScreen text={t("loading.statistics")} />;
   }
 
   const { colors } = useTheme();
@@ -1778,30 +1778,6 @@ export default function StatisticsScreen() {
       <SafeAreaView
         style={[styles.container, { backgroundColor: colors.background }]}
       >
-        <LinearGradient
-          colors={["#10B981", "#059669", "#047857"]}
-          style={styles.modernHeader}
-        >
-          <View style={styles.headerTop}>
-            <View style={styles.headerIconContainer}>
-              <BarChart3 size={28} color="#FFFFFF" />
-            </View>
-            <View style={styles.headerTextContainer}>
-              <Text style={[styles.headerTitle, { color: "#FFFFFF" }]}>
-                {t("statistics.title") || "Statistics"}
-              </Text>
-              <Text
-                style={[
-                  styles.headerSubtitle,
-                  { color: "rgba(255, 255, 255, 0.9)" },
-                ]}
-              >
-                {t("statistics.subtitle") || "Track your progress"}
-              </Text>
-            </View>
-          </View>
-        </LinearGradient>
-
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}

@@ -520,28 +520,6 @@ export default function AIChatScreen({
     <SafeAreaView
       style={[styles.container, { backgroundColor: colors.background }]}
     >
-      {/* Fixed Header - Outside KeyboardAvoidingView */}
-      <View style={styles.headerWrapper}>
-        <View style={styles.header}>
-          <View style={styles.headerContent}>
-            <View style={styles.headerLeft}>
-              <View style={styles.headerTextContainer}>
-                <Text style={[styles.headerTitle, { color: colors.text }]}>
-                  {t("ai_chat.title")}
-                </Text>
-
-                <Text style={[styles.headerSubtitle, { color: colors.text }]}>
-                  {t("ai_chat.subtitle")}
-                </Text>
-              </View>
-            </View>
-            <TouchableOpacity style={styles.clearButton} onPress={clearChat}>
-              <Trash2 size={20} color={colors.destructive} />
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-
       {/* Scrollable Content with Input */}
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -555,6 +533,32 @@ export default function AIChatScreen({
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Fixed Header - Outside KeyboardAvoidingView */}
+          <View style={styles.headerWrapper}>
+            <View style={styles.header}>
+              <View style={styles.headerContent}>
+                <View style={styles.headerLeft}>
+                  <View style={styles.headerTextContainer}>
+                    <Text style={[styles.headerTitle, { color: colors.text }]}>
+                      {t("ai_chat.title")}
+                    </Text>
+
+                    <Text
+                      style={[styles.headerSubtitle, { color: colors.text }]}
+                    >
+                      {t("ai_chat.subtitle")}
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={styles.clearButton}
+                  onPress={clearChat}
+                >
+                  <Trash2 size={20} color={colors.destructive} />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
           {/* Profile Card */}
           {(userProfile.allergies.length > 0 ||
             userProfile.medicalConditions.length > 0) && (
