@@ -27,6 +27,7 @@ import { HealthData } from "../../src/services/healthKit";
 import LoadingScreen from "@/components/LoadingScreen";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import axios from "axios";
+import { SupportedDevice } from "@/src/types/devices";
 
 const getApiBaseUrl = () => {
   if (__DEV__) {
@@ -34,24 +35,6 @@ const getApiBaseUrl = () => {
   }
   return "https://your-production-api.com/api";
 };
-
-type DeviceType =
-  | "APPLE_HEALTH"
-  | "GOOGLE_FIT"
-  | "FITBIT"
-  | "GARMIN"
-  | "WHOOP"
-  | "POLAR"
-  | "SAMSUNG_HEALTH";
-
-interface SupportedDevice {
-  type: DeviceType;
-  name: string;
-  icon: React.ComponentProps<typeof Ionicons>["name"];
-  color: string;
-  available: boolean;
-  description: string;
-}
 
 const SUPPORTED_DEVICES: SupportedDevice[] = [
   {

@@ -118,3 +118,16 @@ export interface EnhancedCalendarStats {
     streakDiff: number;
   };
 }
+export interface StatisticsCarouselProps {
+  statistics: EnhancedCalendarStats | null;
+  isLoading?: boolean;
+  language?: string;
+}
+
+export interface MonthStats {
+  totalDays: number;
+  successfulDays: number;
+  averageCompletion: number;
+  bestStreak: number;
+  currentStreak: number;
+}

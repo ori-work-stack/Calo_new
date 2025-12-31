@@ -1,5 +1,5 @@
 import express, { Request, Response } from "express";
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import { authenticateToken } from "../middleware/auth";
 import { z } from "zod";
 
@@ -412,13 +412,17 @@ router.put(
 
       // Handle potential metadata updates if provided, e.g., barcode
       if (req.body.metadata?.barcode !== undefined) {
+        const existingMetadata =
+          existingItem.metadata &&
+          typeof existingItem.metadata === "object" &&
+          !Array.isArray(existingItem.metadata)
+            ? (existingItem.metadata as Prisma.JsonObject)
+            : {};
+
         updateData.metadata = {
-          ...existingItem.metadata,
+          ...existingMetadata,
           barcode: req.body.metadata.barcode,
         };
-      } else if (req.body.metadata === null) {
-        // Allow clearing metadata if needed
-        updateData.metadata = null;
       }
 
       const updatedItem = await prisma.shoppingList.update({

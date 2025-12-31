@@ -43,38 +43,9 @@ import {
 } from "lucide-react-native";
 import LoadingScreen from "@/components/LoadingScreen";
 import i18n from "@/src/i18n";
+import { DayData, MonthStats } from "@/src/types/calendar";
 
 const { width } = Dimensions.get("window");
-
-interface DayData {
-  date: string;
-  calories_goal: number;
-  calories_actual: number;
-  protein_goal: number;
-  protein_actual: number;
-  carbs_goal: number;
-  carbs_actual: number;
-  fat_goal: number;
-  fat_actual: number;
-  meal_count: number;
-  quality_score: number;
-  water_intake_ml: number;
-  events: Array<{
-    id: string;
-    title: string;
-    type: string;
-    created_at: string;
-    description?: string;
-  }>;
-}
-
-interface MonthStats {
-  totalDays: number;
-  successfulDays: number;
-  averageCompletion: number;
-  bestStreak: number;
-  currentStreak: number;
-}
 
 export default function CalendarScreen() {
   const dispatch = useDispatch<AppDispatch>();
@@ -621,10 +592,7 @@ export default function CalendarScreen() {
     return (
       <View style={styles.section}>
         <View style={styles.gamificationContainer}>
-          <LinearGradient
-            colors={["#16A08515", "#16A08505"]}
-            style={styles.statsGradient}
-          >
+          <View style={styles.statsGradient}>
             <View style={styles.gamificationHeader}>
               <Text style={styles.gamificationTitle}>
                 🏆 Recent Achievements
@@ -643,7 +611,7 @@ export default function CalendarScreen() {
                 </View>
               ))}
             </ScrollView>
-          </LinearGradient>
+          </View>
         </View>
       </View>
     );
@@ -1600,6 +1568,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "700",
     color: "#1F2937",
+  },
+  statsGradient: {
+    backgroundColor: "#16A08515",
   },
   statLabel: {
     fontSize: 11,

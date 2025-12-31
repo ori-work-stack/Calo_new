@@ -48,6 +48,13 @@ import LoadingScreen from "@/components/LoadingScreen";
 import MenuRatingModal from "@/components/menu/MenuRatingModal";
 import MealRatingCard from "@/components/menu/MealRatingCard";
 import { MenuReviewStatistics } from "@/components/menu/MenuReviewStatistics"; // Assuming this component exists
+import {
+  MealPlan,
+  PlanMeal,
+  SelectedMealForCompletion,
+  MealCompletionData,
+  SwapRequest,
+} from "@/src/types/recommended-menus";
 
 // Placeholder for removeMeal and refreshMealData if they are Redux actions or similar
 // Assuming they are imported from somewhere else and are defined elsewhere
@@ -68,78 +75,6 @@ const dispatch = (action: any) => {
 };
 
 const { width, width: screenWidth } = Dimensions.get("window");
-
-interface MealPlan {
-  plan_id: string;
-  name: string;
-  description?: string;
-  start_date: string;
-  end_date?: string;
-  is_active: boolean;
-  target_calories_daily?: number;
-  target_protein_daily?: number;
-  target_carbs_daily?: number;
-  target_fats_daily?: number;
-  weekly_plan: {
-    [day: string]: {
-      [timing: string]: PlanMeal[];
-    };
-  };
-  days_count: number; // Added for clarity in calculations
-}
-
-interface PlanMeal {
-  template_id: string;
-  name: string;
-  description?: string;
-  meal_timing: string;
-  dietary_category: string;
-  prep_time_minutes?: number;
-  difficulty_level?: number;
-  calories: number;
-  protein_g: number;
-  carbs_g: number;
-  fats_g: number;
-  fiber_g?: number;
-  sugar_g?: number;
-  sodium_mg?: number;
-  ingredients: string[];
-  instructions: string[];
-  allergens: string[];
-  image_url?: string;
-  user_rating?: number;
-  user_comments?: string;
-  is_favorite?: boolean;
-}
-
-interface SwapRequest {
-  currentMeal: PlanMeal;
-  dayName: string;
-  mealTiming: string;
-  preferences?: {
-    userNotes?: string;
-    targetCalories?: string;
-    targetProtein?: string;
-    targetCarbs?: string;
-    targetFat?: string;
-    dietary_category?: string;
-    max_prep_time?: number;
-    protein_preference?: "higher" | "lower" | "same";
-    calorie_preference?: "higher" | "lower" | "same";
-  };
-}
-
-interface MealCompletionData {
-  rating: number;
-  notes: string;
-  prep_time_actual: number;
-}
-
-interface SelectedMealForCompletion {
-  meal: PlanMeal;
-  dayName: string;
-  timing: string;
-}
 
 export default function ActiveMenu() {
   const { t } = useTranslation();

@@ -55,56 +55,8 @@ import {
   EnhancedMenuCreator,
 } from "@/components/menu";
 import { ToastService } from "@/src/services/totastService";
-
-interface RecommendedMenu {
-  menu_id: string;
-  title: string;
-  description?: string;
-  total_calories: number;
-  total_protein?: number;
-  total_carbs?: number;
-  total_fat?: number;
-  total_fiber?: number;
-  days_count: number;
-  dietary_category?: string;
-  estimated_cost?: number;
-  prep_time_minutes?: number;
-  difficulty_level: number;
-  is_active: boolean;
-  created_at: string;
-  meals: Array<{
-    meal_id: string;
-    name: string;
-    meal_type: string;
-    day_number: number;
-    calories: number;
-    protein: number;
-    carbs: number;
-    fat: number;
-    fiber?: number;
-    prep_time_minutes?: number;
-    cooking_method?: string;
-    instructions?: string;
-    ingredients: Array<{
-      ingredient_id: string;
-      name: string;
-      quantity: number;
-      unit: string;
-      category?: string;
-      estimated_cost?: number;
-    }>;
-  }>;
-}
-
-// Filter Types
-const FILTER_OPTIONS = [
-  { key: "all", label: "All Menus", icon: ChefHat },
-  { key: "recent", label: "Recent", icon: Clock },
-  { key: "high_protein", label: "High Protein", icon: TrendingUp },
-  { key: "low_calorie", label: "Low Calorie", icon: Target },
-  { key: "quick_prep", label: "Quick Prep", icon: Zap },
-  { key: "budget_friendly", label: "Budget Friendly", icon: DollarSign },
-] as const;
+import { RecommendedMenu } from "@/src/types/recommended-menus";
+import { FILTER_OPTIONS } from "@/src/Features/Features/recommended-features";
 
 // Enhanced Filter Modal
 const FilterModal = ({

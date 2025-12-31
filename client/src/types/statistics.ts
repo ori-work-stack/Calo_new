@@ -140,3 +140,60 @@ export interface TimeFilterOption {
   key: TimePeriod;
   label: string;
 }
+
+export interface ProductData {
+  barcode?: string;
+  name: string;
+  brand?: string;
+  category: string;
+  nutrition_per_100g: {
+    calories: number;
+    protein: number;
+    carbs: number;
+    fat: number;
+    fiber?: number;
+    sugar?: number;
+    sodium?: number;
+    saturated_fat?: number;
+    trans_fat?: number;
+    cholesterol?: number;
+    potassium?: number;
+    calcium?: number;
+    iron?: number;
+    vitamin_c?: number;
+    vitamin_d?: number;
+  };
+  ingredients: string[];
+  allergens: string[];
+  labels: string[];
+  health_score?: number;
+  image_url?: string;
+  serving_size?: string;
+  servings_per_container?: number;
+}
+
+export interface UserAnalysis {
+  compatibility_score: number;
+  daily_contribution: {
+    calories_percent: number;
+    protein_percent: number;
+    carbs_percent: number;
+    fat_percent: number;
+  };
+  alerts: string[];
+  recommendations: string[];
+  health_assessment: string;
+}
+
+export interface ScanResult {
+  product: ProductData;
+  user_analysis: UserAnalysis;
+}
+
+export interface PriceEstimate {
+  estimated_price: number;
+  price_range: string;
+  currency: string;
+  confidence: string;
+  market_context: string;
+}

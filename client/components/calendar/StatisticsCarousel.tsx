@@ -20,17 +20,14 @@ import {
   BarChart3,
 } from "lucide-react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { EnhancedCalendarStats } from "@/src/types/calendarStats";
+import {
+  EnhancedCalendarStats,
+  StatisticsCarouselProps,
+} from "@/src/types/calendar";
 
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = width * 0.85;
 const CARD_SPACING = 15;
-
-interface StatisticsCarouselProps {
-  statistics: EnhancedCalendarStats | null;
-  isLoading?: boolean;
-  language?: string;
-}
 
 const StatisticsCarousel: React.FC<StatisticsCarouselProps> = ({
   statistics,

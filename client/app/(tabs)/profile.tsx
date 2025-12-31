@@ -44,22 +44,7 @@ import * as ImagePicker from "expo-image-picker";
 import { ToastService } from "@/src/services/totastService";
 import { useTheme } from "@/src/context/ThemeContext";
 import LanguageSelector from "@/components/LanguageSelector";
-
-// Define the interface for menu items
-interface MenuItem {
-  id: string;
-  title: string;
-  icon: React.ReactElement;
-  onPress?: () => void;
-  rightComponent?: React.ReactElement;
-  subtitle?: string;
-  danger?: boolean;
-}
-
-interface MenuSection {
-  title: string;
-  items: MenuItem[];
-}
+import { MenuSection } from "@/src/types/profile";
 
 export default function ProfileScreen() {
   const { t } = useTranslation();

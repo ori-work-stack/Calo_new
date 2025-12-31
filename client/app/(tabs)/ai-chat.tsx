@@ -33,30 +33,9 @@ import { useRouter } from "expo-router";
 import { useSelector } from "react-redux";
 import { RootState } from "@/src/store";
 import { useTheme } from "@/src/context/ThemeContext";
+import { AIChatScreenProps, Message, UserProfile } from "@/src/types/ai-chat";
 
 const { width } = Dimensions.get("window");
-
-interface AIChatScreenProps {
-  onClose?: () => void;
-  onMinimize?: () => void;
-}
-
-interface Message {
-  id: string;
-  type: "user" | "bot";
-  content: string;
-  timestamp: Date;
-  hasWarning?: boolean;
-  allergenWarning?: string[];
-  suggestions?: string[];
-}
-
-interface UserProfile {
-  allergies: string[];
-  medicalConditions: string[];
-  dietaryPreferences: string[];
-  goals: string[];
-}
 
 export default function AIChatScreen({
   onClose,

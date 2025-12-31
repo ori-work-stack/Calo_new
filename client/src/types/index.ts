@@ -319,3 +319,13 @@ export interface MealAnalysis {
     sugar?: number;
   }>;
 }
+export interface DailyGoals {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  targetCalories: number;
+  targetProtein: number;
+  targetCarbs: number;
+  targetFat: number;
+}

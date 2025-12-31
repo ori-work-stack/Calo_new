@@ -67,17 +67,11 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import Swipeable from "react-native-gesture-handler/Swipeable";
 import { nutritionAPI } from "@/src/services/api";
 import ManualMealAddition from "@/components/history/ManualMealAddition";
+import { FilterOptions } from "@/src/types/history";
 
 const { width } = Dimensions.get("window");
 const CARD_WIDTH = width - 40;
 
-interface FilterOptions {
-  category: string;
-  dateRange: string;
-  minCalories: number;
-  maxCalories: number;
-  showFavoritesOnly: boolean;
-}
 const CATEGORIES = [
   {
     key: "all",

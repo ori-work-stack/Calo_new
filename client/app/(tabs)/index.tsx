@@ -45,19 +45,9 @@ import CircularCaloriesProgress from "@/components/index/CircularCaloriesProgres
 import ShoppingList from "@/components/ShoppingList";
 import { initializeStorageCleanup } from "@/src/utils/databaseCleanup";
 import WaterIntakeCard from "@/components/index/WaterIntake";
+import { DailyGoals } from "@/src/types";
 
 const { width } = Dimensions.get("window");
-
-interface DailyGoals {
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  targetCalories: number;
-  targetProtein: number;
-  targetCarbs: number;
-  targetFat: number;
-}
 
 const HomeScreen = React.memo(() => {
   const dispatch = useDispatch<AppDispatch>();

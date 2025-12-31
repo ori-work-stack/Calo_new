@@ -809,8 +809,7 @@ export const AIRecommendationsSection: React.FC<
         showsVerticalScrollIndicator={false}
       >
         {/* Detail Header */}
-        <LinearGradient
-          colors={priorityConfig.colors}
+        <View
           style={styles.detailHeader}
         >
           <View style={styles.detailHeaderContent}>
@@ -842,7 +841,7 @@ export const AIRecommendationsSection: React.FC<
               </View>
             </View>
           </View>
-        </LinearGradient>
+        </View>
 
         {/* Categories */}
         <View style={styles.categoriesContainer}>

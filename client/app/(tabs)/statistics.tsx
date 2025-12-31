@@ -893,7 +893,7 @@ export default function StatisticsScreen() {
             user_id: rec.user_id,
           })
         );
-        console.log(response.data)
+        console.log(response.data);
         console.log(
           "✅ Transformed AI recommendations:",
           transformedRecommendations
@@ -1837,23 +1837,15 @@ export default function StatisticsScreen() {
               {renderMealCompletionStatus()}
 
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>
-                  {t("statistics.data_visualization") || "Data Visualization"}
-                </Text>
-
                 <ChartNavigation
                   charts={availableCharts}
                   activeChart={activeChart}
                   onChartChange={setActiveChart}
                 />
-
                 {renderActiveChart()}
               </View>
 
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>
-                  {t("statistics.gamification") || "Gamification"}
-                </Text>
                 <View style={styles.gamificationContainer}>
                   <View style={styles.levelContainer}>
                     <View style={styles.levelInfo}>
@@ -1865,8 +1857,7 @@ export default function StatisticsScreen() {
                       </LinearGradient>
                       <View style={styles.levelDetails}>
                         <Text style={styles.levelText}>
-                          {t("statistics.level") || "Level"}{" "}
-                          {user?.level}
+                          {t("statistics.level") || "Level"} {user?.level}
                         </Text>
                         <Text style={styles.xpText}>
                           {user?.total_points?.toString()} /{" "}
@@ -2412,30 +2403,16 @@ export default function StatisticsScreen() {
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     backgroundColor: "#F8FAFC",
   },
 
   modernHeader: {
     paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 32,
     borderBottomLeftRadius: 32,
     borderBottomRightRadius: 32,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.15,
-        shadowRadius: 16,
-      },
-      android: {
-        elevation: 8,
-      },
-    }),
   },
   headerTop: {
     flexDirection: "row",
@@ -2578,7 +2555,6 @@ const styles = StyleSheet.create({
 
   timeFilterContainer: {
     paddingHorizontal: 20,
-    marginTop: -20,
     marginBottom: 24,
   },
   timeFilter: {
@@ -2586,17 +2562,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderRadius: 24,
     padding: 4,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#1E293B",
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.08,
-        shadowRadius: 20,
-      },
-      android: {
-        elevation: 6,
-      },
-    }),
+   
   },
   timeFilterButton: {
     flex: 1,
@@ -2835,6 +2801,9 @@ const styles = StyleSheet.create({
   },
   levelContainer: {
     marginBottom: 28,
+  },
+  scrollContent: {
+    paddingBottom: 24,
   },
   levelInfo: {
     flexDirection: "row",

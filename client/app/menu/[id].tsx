@@ -43,53 +43,10 @@ import {
 } from "lucide-react-native";
 import { api } from "@/src/services/api";
 import LoadingScreen from "@/components/LoadingScreen";
+import { Meal, MenuDetails } from "@/src/types/recommended-menus";
 
 const { width: screenWidth } = Dimensions.get("window");
 
-interface Ingredient {
-  ingredient_id: string;
-  name: string;
-  quantity: number;
-  unit: string;
-  category?: string;
-  estimated_cost?: number;
-}
-
-interface Meal {
-  meal_id: string;
-  name: string;
-  meal_type: string;
-  day_number: number;
-  calories: number;
-  protein: number;
-  carbs: number;
-  fat: number;
-  fiber?: number;
-  prep_time_minutes?: number;
-  cooking_method?: string;
-  instructions?: string;
-  dietary_category?: string;
-  ingredients: Ingredient[];
-}
-
-interface MenuDetails {
-  menu_id: string;
-  title: string;
-  description?: string;
-  total_calories: number;
-  total_protein?: number;
-  total_carbs?: number;
-  total_fat?: number;
-  total_fiber?: number;
-  days_count: number;
-  dietary_category?: string;
-  estimated_cost?: number;
-  prep_time_minutes?: number;
-  difficulty_level: number;
-  is_active: boolean;
-  created_at: string;
-  meals: Meal[];
-}
 
 export default function MenuDetailsScreen() {
   const { id } = useLocalSearchParams();

@@ -41,65 +41,9 @@ import ButtonLoader from "@/components/ButtonLoader";
 import { ToastService } from "@/src/services/totastService";
 import { useTheme } from "@/src/context/ThemeContext";
 import ScannedProducts from "@/components/ScannedProducts";
+import { PriceEstimate, ProductData, ScanResult } from "@/src/types/statistics";
 
 const { width, height } = Dimensions.get("window");
-
-interface ProductData {
-  barcode?: string;
-  name: string;
-  brand?: string;
-  category: string;
-  nutrition_per_100g: {
-    calories: number;
-    protein: number;
-    carbs: number;
-    fat: number;
-    fiber?: number;
-    sugar?: number;
-    sodium?: number;
-    saturated_fat?: number;
-    trans_fat?: number;
-    cholesterol?: number;
-    potassium?: number;
-    calcium?: number;
-    iron?: number;
-    vitamin_c?: number;
-    vitamin_d?: number;
-  };
-  ingredients: string[];
-  allergens: string[];
-  labels: string[];
-  health_score?: number;
-  image_url?: string;
-  serving_size?: string;
-  servings_per_container?: number;
-}
-
-interface UserAnalysis {
-  compatibility_score: number;
-  daily_contribution: {
-    calories_percent: number;
-    protein_percent: number;
-    carbs_percent: number;
-    fat_percent: number;
-  };
-  alerts: string[];
-  recommendations: string[];
-  health_assessment: string;
-}
-
-interface ScanResult {
-  product: ProductData;
-  user_analysis: UserAnalysis;
-}
-
-interface PriceEstimate {
-  estimated_price: number;
-  price_range: string;
-  currency: string;
-  confidence: string;
-  market_context: string;
-}
 
 export default function FoodScannerScreen() {
   const { t } = useTranslation();
@@ -583,11 +527,7 @@ export default function FoodScannerScreen() {
       <View style={[styles.modernHeader]}>
         <View style={styles.headerTop}>
           {/* Icon Container with theme-aware background */}
-          <View
-            style={[
-              styles.headerIconContainer,
-            ]}
-          >
+          <View style={[styles.headerIconContainer]}>
             <ScanLine size={28} color={colors.text} strokeWidth={2.5} />
           </View>
 
@@ -610,9 +550,7 @@ export default function FoodScannerScreen() {
 
           {/* Gallery Button with theme-aware styling */}
           <TouchableOpacity
-            style={[
-              styles.galleryButton,
-            ]}
+            style={[styles.galleryButton]}
             onPress={() => setShowProductsGallery(true)}
             activeOpacity={0.7}
           >
@@ -1070,7 +1008,7 @@ export default function FoodScannerScreen() {
 }
 
 const styles = StyleSheet.create({
-   container: {
+  container: {
     flex: 1,
   },
 
@@ -1158,7 +1096,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 16,
     right: 16,
-    top:100,
+    top: 100,
     height: 2,
     backgroundColor: "#34D399",
     shadowColor: "#34D399",
@@ -1516,5 +1454,4 @@ const styles = StyleSheet.create({
     color: "#6B7280",
     textAlign: "center",
   },
-  
 });
