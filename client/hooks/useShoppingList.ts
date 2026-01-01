@@ -11,7 +11,7 @@ interface ShoppingListItem {
   category?: string;
   added_from?: string;
   product_barcode?: string;
-  estimated_price?: number;
+  estimated_cost?: number;
 }
 
 export const useShoppingList = () => {
@@ -27,10 +27,31 @@ export const useShoppingList = () => {
     queryKey: ["shoppingList"],
     queryFn: async () => {
       try {
+        console.log("📦 [ShoppingList Hook] Fetching shopping list...");
         const response = await api.get("/shopping-lists");
+        console.log("✅ [ShoppingList Hook] Received response:", response.data);
+
+        if (!response.data.success) {
+          console.error(
+            "❌ [ShoppingList Hook] API returned error:",
+            response.data.error
+          );
+          throw new Error(
+            response.data.error || "Failed to fetch shopping list"
+          );
+        }
+
         return response.data.data || [];
-      } catch (error) {
-        console.error("Error fetching shopping list:", error);
+      } catch (error: any) {
+        console.error(
+          "❌ [ShoppingList Hook] Error fetching shopping list:",
+          error
+        );
+        console.error("❌ [ShoppingList Hook] Error details:", {
+          message: error.message,
+          response: error.response?.data,
+          status: error.response?.status,
+        });
         throw error;
       }
     },
@@ -41,8 +62,18 @@ export const useShoppingList = () => {
   // Add single item
   const addItemMutation = useMutation({
     mutationFn: async (item: ShoppingListItem) => {
-      console.log("🛒 Adding item to shopping list:", item);
+      console.log("🛒 [ShoppingList Hook] Adding item to shopping list:", item);
       const response = await api.post("/shopping-lists", item);
+      console.log("✅ [ShoppingList Hook] Add item response:", response.data);
+
+      if (!response.data.success) {
+        console.error(
+          "❌ [ShoppingList Hook] Add item failed:",
+          response.data.error
+        );
+        throw new Error(response.data.error || "Failed to add item");
+      }
+
       return response.data;
     },
     onMutate: async (newItem) => {
@@ -66,7 +97,7 @@ export const useShoppingList = () => {
       return { previousList };
     },
     onSuccess: (data) => {
-      console.log("✅ Item added successfully:", data);
+      console.log("✅ [ShoppingList Hook] Item added successfully:", data);
 
       // Invalidate and refetch to get the latest data
       queryClient.invalidateQueries({ queryKey: ["shoppingList"] });
@@ -74,23 +105,45 @@ export const useShoppingList = () => {
 
       Alert.alert("Success", "Item added to shopping list!");
     },
-    onError: (error, variables, context) => {
-      console.error("❌ Error adding item:", error);
+    onError: (error: any, variables, context) => {
+      console.error("❌ [ShoppingList Hook] Error adding item:", error);
+      console.error("❌ [ShoppingList Hook] Error details:", {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+      });
 
       // Rollback optimistic update
       if (context?.previousList) {
         queryClient.setQueryData(["shoppingList"], context.previousList);
       }
 
-      Alert.alert("Error", "Failed to add item to shopping list");
+      const errorMessage =
+        error.response?.data?.error ||
+        error.message ||
+        "Failed to add item to shopping list";
+      Alert.alert("Error", errorMessage);
     },
   });
 
   // Bulk add items
   const bulkAddMutation = useMutation({
     mutationFn: async (items: ShoppingListItem[]) => {
-      console.log("🛒 Bulk adding items to shopping list:", items.length);
+      console.log(
+        "🛒 [ShoppingList Hook] Bulk adding items to shopping list:",
+        items.length
+      );
       const response = await api.post("/shopping-lists/bulk-add", { items });
+      console.log("✅ [ShoppingList Hook] Bulk add response:", response.data);
+
+      if (!response.data.success) {
+        console.error(
+          "❌ [ShoppingList Hook] Bulk add failed:",
+          response.data.error
+        );
+        throw new Error(response.data.error || "Failed to bulk add items");
+      }
+
       return response.data;
     },
     onMutate: async (newItems) => {
@@ -118,7 +171,7 @@ export const useShoppingList = () => {
       return { previousList };
     },
     onSuccess: (data) => {
-      console.log("✅ Bulk add completed:", data);
+      console.log("✅ [ShoppingList Hook] Bulk add completed:", data);
 
       // Invalidate and refetch to get the latest data
       queryClient.invalidateQueries({ queryKey: ["shoppingList"] });
@@ -129,15 +182,24 @@ export const useShoppingList = () => {
         `${data.data?.total || 0} items added to shopping list!`
       );
     },
-    onError: (error, variables, context) => {
-      console.error("❌ Error bulk adding items:", error);
+    onError: (error: any, variables, context) => {
+      console.error("❌ [ShoppingList Hook] Error bulk adding items:", error);
+      console.error("❌ [ShoppingList Hook] Error details:", {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+      });
 
       // Rollback optimistic update
       if (context?.previousList) {
         queryClient.setQueryData(["shoppingList"], context.previousList);
       }
 
-      Alert.alert("Error", "Failed to add items to shopping list");
+      const errorMessage =
+        error.response?.data?.error ||
+        error.message ||
+        "Failed to add items to shopping list";
+      Alert.alert("Error", errorMessage);
     },
   });
 

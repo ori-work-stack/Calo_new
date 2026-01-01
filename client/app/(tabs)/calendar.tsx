@@ -168,29 +168,77 @@ export default function CalendarScreen() {
   console.log(user);
 
   useEffect(() => {
+    console.log("🔄 [Calendar] Date changed, loading data...");
     loadCalendarData();
   }, [currentDate.getFullYear(), currentDate.getMonth()]);
 
   useEffect(() => {
     if (error) {
-      Alert.alert("Error", error, [
-        { text: "OK", onPress: () => dispatch(clearError()) },
+      console.error("❌ [Calendar] Error detected:", error);
+      Alert.alert("Calendar Error", error, [
+        {
+          text: "Retry",
+          onPress: () => {
+            dispatch(clearError());
+            loadCalendarData();
+          },
+        },
+        {
+          text: "Dismiss",
+          style: "cancel",
+          onPress: () => dispatch(clearError()),
+        },
       ]);
     }
   }, [error, dispatch]);
 
   const loadCalendarData = useCallback(async () => {
+    console.log("📅 [Calendar] Starting to load calendar data");
     setIsLoadingCalendar(true);
     try {
       const year = currentDate.getFullYear();
       const month = currentDate.getMonth() + 1;
-      await Promise.all([
-        dispatch(fetchCalendarData({ year, month })),
-        dispatch(getStatistics({ year, month })),
-        dispatch(getEnhancedStatistics({ year, month })),
+
+      console.log(`📅 [Calendar] Loading data for ${year}/${month}`);
+
+      const results = await Promise.allSettled([
+        dispatch(fetchCalendarData({ year, month })).unwrap(),
+        dispatch(getStatistics({ year, month })).unwrap(),
+        dispatch(getEnhancedStatistics({ year, month })).unwrap(),
       ]);
+
+      const [calendarResult, statsResult, enhancedResult] = results;
+
+      if (calendarResult.status === "rejected") {
+        console.error(
+          "❌ [Calendar] Calendar data failed:",
+          calendarResult.reason
+        );
+      } else {
+        console.log("✅ [Calendar] Calendar data loaded successfully");
+      }
+
+      if (statsResult.status === "rejected") {
+        console.warn(
+          "⚠️ [Calendar] Stats failed (non-critical):",
+          statsResult.reason
+        );
+      } else {
+        console.log("✅ [Calendar] Statistics loaded successfully");
+      }
+
+      if (enhancedResult.status === "rejected") {
+        console.warn(
+          "⚠️ [Calendar] Enhanced stats failed (non-critical):",
+          enhancedResult.reason
+        );
+      } else {
+        console.log("✅ [Calendar] Enhanced statistics loaded successfully");
+      }
+
+      console.log("✅ [Calendar] All calendar data loading complete");
     } catch (error) {
-      console.error("Calendar load error:", error);
+      console.error("💥 [Calendar] Calendar load error:", error);
     } finally {
       setIsLoadingCalendar(false);
     }
@@ -637,13 +685,17 @@ export default function CalendarScreen() {
     );
   };
 
-  if (isLoading && Object.keys(calendarData).length === 0) {
+  if (
+    (isLoading || isLoadingCalendar) &&
+    Object.keys(calendarData).length === 0
+  ) {
     return (
       <LoadingScreen text={isRTL ? "טוען לוח שנה" : "Loading Calendar..."} />
     );
   }
 
-  const hasNoData = Object.keys(calendarData).length === 0 && !isLoading;
+  const hasNoData =
+    Object.keys(calendarData).length === 0 && !isLoading && !isLoadingCalendar;
 
   return (
     <SafeAreaView

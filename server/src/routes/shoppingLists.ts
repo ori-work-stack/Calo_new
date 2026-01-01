@@ -24,7 +24,7 @@ const createSchema = z.object({
   category: z.string().default("Manual"),
   added_from: z.string().optional(),
   product_barcode: z.string().optional(),
-  estimated_price: z.number().optional(),
+  estimated_cost: z.number().optional(),
 });
 
 const updateSchema = z.object({
@@ -77,16 +77,21 @@ router.get(
     try {
       const userId = req.user?.user_id;
       if (!userId) {
+        console.error("❌ [ShoppingList] User not authenticated");
         return res.status(401).json({
           success: false,
           error: "User not authenticated",
         });
       }
 
+      console.log("📦 [ShoppingList] Fetching shopping list for user:", userId);
+
       const shoppingList = await prisma.shoppingList.findMany({
         where: { user_id: userId },
         orderBy: [{ is_purchased: "asc" }, { created_at: "desc" }],
       });
+
+      console.log("✅ [ShoppingList] Found", shoppingList.length, "items");
 
       res.json({
         success: true,
@@ -110,7 +115,7 @@ router.get(
         })),
       });
     } catch (error) {
-      console.error("Error fetching shopping list:", error);
+      console.error("❌ [ShoppingList] Error fetching shopping list:", error);
       res.status(500).json({
         success: false,
         error: "Failed to fetch shopping list",
@@ -128,13 +133,14 @@ router.post(
     try {
       const userId = req.user?.user_id;
       if (!userId) {
+        console.error("❌ [ShoppingList] User not authenticated");
         return res.status(401).json({
           success: false,
           error: "User not authenticated",
         });
       }
 
-      console.log("📦 Adding shopping list item:", req.body);
+      console.log("📦 [ShoppingList] Adding item for user:", userId, req.body);
 
       // Validate input using zod schema
       const validatedData = createSchema.parse(req.body);
@@ -175,7 +181,7 @@ router.post(
         unit: validatedData.unit,
         category: validatedData.category,
         added_from: validatedData.added_from || "manual",
-        estimated_cost: validatedData.estimated_price || null,
+        estimated_cost: validatedData.estimated_cost || null,
         is_purchased: false,
       };
 
@@ -188,7 +194,7 @@ router.post(
         data: createData,
       });
 
-      console.log("✅ Shopping list item created:", item);
+      console.log("✅ [ShoppingList] Item created:", item.id, item.name);
 
       res.status(201).json({
         success: true,
@@ -196,7 +202,7 @@ router.post(
         message: "Item added successfully",
       });
     } catch (error) {
-      console.error("❌ Error adding item to shopping list:", error);
+      console.error("❌ [ShoppingList] Error adding item:", error);
       if (error instanceof z.ZodError) {
         return res.status(400).json({
           success: false,
@@ -236,7 +242,12 @@ router.post(
         });
       }
 
-      console.log("📦 Bulk adding shopping list items:", items.length);
+      console.log(
+        "📦 [ShoppingList] Bulk adding items for user:",
+        userId,
+        "- count:",
+        items.length
+      );
 
       const addedItems: any[] = [];
       const updatedItems: any[] = [];
@@ -278,7 +289,7 @@ router.post(
               unit: validatedData.unit,
               category: validatedData.category,
               added_from: validatedData.added_from || "manual",
-              estimated_cost: validatedData.estimated_price || null,
+              estimated_cost: validatedData.estimated_cost || null,
               is_purchased: false,
             };
 
@@ -323,7 +334,7 @@ router.post(
       }
 
       console.log(
-        `✅ Bulk add completed: ${addedItems.length} added, ${updatedItems.length} updated`
+        `✅ [ShoppingList] Bulk add completed: ${addedItems.length} added, ${updatedItems.length} updated`
       );
 
       res.status(201).json({

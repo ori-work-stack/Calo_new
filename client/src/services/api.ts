@@ -1155,16 +1155,55 @@ export const chatAPI = {
 export const calendarAPI = {
   async getCalendarData(year: number, month: number): Promise<any> {
     try {
+      console.log(`📅 Fetching calendar data for ${year}/${month}`);
       const response = await api.get(`/calendar/data/${year}/${month}`, {
-        timeout: 10000,
+        timeout: 15000,
       });
-      return response.data.success ? response.data.data : {};
+
+      if (response.data.success) {
+        console.log(
+          "✅ Calendar data fetched:",
+          Object.keys(response.data.data || {}).length,
+          "days"
+        );
+        return response.data.data || {};
+      }
+
+      throw new APIError(
+        response.data.error || "Failed to fetch calendar data"
+      );
     } catch (error: any) {
       console.error("💥 Get calendar data error:", error);
+
       if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
-        console.warn("⚠️ Calendar data request timed out");
+        throw new APIError(
+          "Calendar data request timed out. Please check your connection.",
+          408,
+          "TIMEOUT",
+          true
+        );
       }
-      return {};
+
+      if (
+        error.code === "ERR_NETWORK" ||
+        error.message?.includes("Network Error")
+      ) {
+        throw new APIError(
+          "Network error while loading calendar. Please check your connection.",
+          undefined,
+          "NETWORK_ERROR",
+          true
+        );
+      }
+
+      if (error instanceof APIError) throw error;
+
+      throw new APIError(
+        "Failed to load calendar data",
+        undefined,
+        undefined,
+        true
+      );
     }
   },
 
@@ -1172,7 +1211,7 @@ export const calendarAPI = {
     try {
       console.log(`📊 Fetching calendar statistics for ${year}/${month}`);
       const response = await api.get(`/calendar/statistics/${year}/${month}`, {
-        timeout: 10000,
+        timeout: 15000,
       });
 
       if (response.data.success) {
@@ -1180,25 +1219,41 @@ export const calendarAPI = {
         return response.data.data;
       }
 
-      console.warn(
-        "⚠️ Calendar statistics fetch returned non-success response"
+      throw new APIError(
+        response.data.error || "Failed to fetch calendar statistics"
       );
-      return null;
     } catch (error: any) {
       console.error("💥 Get calendar statistics error:", error);
 
       if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
-        console.warn("⚠️ Calendar statistics request timed out");
-      } else if (
-        error.code === "ERR_NETWORK" ||
-        error.message?.includes("Network Error")
-      ) {
-        console.warn(
-          "⚠️ Network error while fetching calendar statistics - returning null"
+        throw new APIError(
+          "Statistics request timed out",
+          408,
+          "TIMEOUT",
+          true
         );
       }
 
-      return null;
+      if (
+        error.code === "ERR_NETWORK" ||
+        error.message?.includes("Network Error")
+      ) {
+        throw new APIError(
+          "Network error while loading statistics",
+          undefined,
+          "NETWORK_ERROR",
+          true
+        );
+      }
+
+      if (error instanceof APIError) throw error;
+
+      throw new APIError(
+        "Failed to load statistics",
+        undefined,
+        undefined,
+        true
+      );
     }
   },
 
@@ -1255,7 +1310,7 @@ export const calendarAPI = {
       const response = await api.get(
         `/calendar/statistics/enhanced/${year}/${month}`,
         {
-          timeout: 15000,
+          timeout: 20000,
         }
       );
 
@@ -1264,25 +1319,41 @@ export const calendarAPI = {
         return response.data.data;
       }
 
-      console.warn(
-        "⚠️ Enhanced calendar statistics fetch returned non-success response"
+      throw new APIError(
+        response.data.error || "Failed to fetch enhanced statistics"
       );
-      return null;
     } catch (error: any) {
       console.error("💥 Get enhanced calendar statistics error:", error);
 
       if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
-        console.warn("⚠️ Enhanced calendar statistics request timed out");
-      } else if (
-        error.code === "ERR_NETWORK" ||
-        error.message?.includes("Network Error")
-      ) {
-        console.warn(
-          "⚠️ Network error while fetching enhanced calendar statistics - returning null"
+        throw new APIError(
+          "Enhanced statistics request timed out",
+          408,
+          "TIMEOUT",
+          true
         );
       }
 
-      return null;
+      if (
+        error.code === "ERR_NETWORK" ||
+        error.message?.includes("Network Error")
+      ) {
+        throw new APIError(
+          "Network error while loading enhanced statistics",
+          undefined,
+          "NETWORK_ERROR",
+          true
+        );
+      }
+
+      if (error instanceof APIError) throw error;
+
+      throw new APIError(
+        "Failed to load enhanced statistics",
+        undefined,
+        undefined,
+        true
+      );
     }
   },
 };
