@@ -48,11 +48,10 @@ import { LinearGradient } from "expo-linear-gradient";
 import {
   ImageSelector,
   SelectedImage,
-  NutritionOverview,
+  AnalysisResults,
   IngredientsList,
   ActionButtons,
   HealthInsights,
-  ScanningAnimation,
 } from "@/components/camera";
 import {
   MealTypeSelector,
@@ -90,12 +89,10 @@ function CameraScreenContent() {
   const [hasBeenAnalyzed, setHasBeenAnalyzed] = useState(false);
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [showResults, setShowResults] = useState(false);
-  const [showScanAnimation, setShowScanAnimation] = useState(false);
   const [selectedMealType, setSelectedMealType] = useState<MealType | null>(
     null
   );
   const [showMealTypeSelector, setShowMealTypeSelector] = useState(true);
-  const [analysisProgress, setAnalysisProgress] = useState(0);
 
   // Animation refs
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -392,20 +389,9 @@ function CameraScreenContent() {
       console.warn("Storage check failed:", error);
     }
 
-    // Show scanning animation with progress
-    setShowScanAnimation(true);
-    setAnalysisProgress(0);
-
-    // Simulate progress during analysis
-    const progressInterval = setInterval(() => {
-      setAnalysisProgress((prev) => Math.min(prev + 10, 90));
-    }, 1000);
-
     try {
       const base64Image = await processImage(selectedImage);
       if (!base64Image) {
-        clearInterval(progressInterval);
-        setShowScanAnimation(false);
         Alert.alert(t("common.error"), "Could not process image.");
         return;
       }
@@ -421,32 +407,12 @@ function CameraScreenContent() {
         mealPeriod: selectedMealType.period,
       };
 
-      console.log("🚀 Analysis parameters:", {
-        hasImage: !!analysisParams.imageBase64,
-        language: analysisParams.language,
-        mealType: analysisParams.mealType,
-        mealPeriod: analysisParams.mealPeriod,
-      });
-
-      console.log("🚀 Starting analysis with params:", {
-        hasImage: !!analysisParams.imageBase64,
-        language: analysisParams.language,
-        mealType: analysisParams.mealType,
-      });
-
       const result = await dispatch(analyzeMeal(analysisParams));
-
-      clearInterval(progressInterval);
-      setAnalysisProgress(100);
 
       if (analyzeMeal.fulfilled.match(result)) {
         console.log("✅ Analysis successful:", result.payload);
-        setTimeout(() => {
-          setShowScanAnimation(false);
-          scrollViewRef.current?.scrollTo({ y: 0, animated: true });
-        }, 500);
+        scrollViewRef.current?.scrollTo({ y: 0, animated: true });
       } else {
-        setShowScanAnimation(false);
         const errorMessage =
           result.payload ||
           "Failed to analyze meal. Please check your connection and try again.";
@@ -459,8 +425,6 @@ function CameraScreenContent() {
         );
       }
     } catch (error) {
-      clearInterval(progressInterval);
-      setShowScanAnimation(false);
       console.error("💥 Analysis error:", error);
 
       let errorMessage = "Analysis failed";
@@ -480,13 +444,8 @@ function CameraScreenContent() {
     }
   };
 
-  // Handle scanning animation completion
-  const handleScanComplete = () => {
-    setShowScanAnimation(false);
-  };
-
   // Re-analysis after edits
-  const handleReAnalyze = async () => {
+  const handleReAnalyze = async (additionalMessage: string = "") => {
     if (!selectedImage || !hasBeenAnalyzed) {
       Alert.alert(t("common.error"), "No meal to re-analyze");
       return;
@@ -496,16 +455,11 @@ function CameraScreenContent() {
       return;
     }
 
-    // Show scanning animation
-    setShowScanAnimation(true);
-
     try {
-      // Trigger immediate cache refresh first
       await immediateRefresh();
 
       const base64Image = await processImage(selectedImage);
       if (!base64Image) {
-        setShowScanAnimation(false);
         Alert.alert(
           t("common.error") || "Error",
           "Could not process image for re-analysis."
@@ -513,7 +467,7 @@ function CameraScreenContent() {
         return;
       }
 
-      let updateText = userComment.trim();
+      let updateText = additionalMessage.trim() || userComment.trim();
       if (editedIngredients.length > 0) {
         const ingredientsList = editedIngredients
           .map((ing) => ing.name)
@@ -540,16 +494,11 @@ function CameraScreenContent() {
 
       console.log("Re-analysis completed:", result);
 
-      // Update local state immediately
       setAnalysisData(result.analysis);
       setEditedIngredients(result.analysis?.ingredients || []);
       setHasBeenAnalyzed(true);
 
-      // Force complete cache invalidation and refresh
       await refreshAllMealData();
-
-      // Hide scanning animation after successful completion
-      setShowScanAnimation(false);
 
       console.log("✅ Re-analysis and cache refresh completed");
 
@@ -558,7 +507,6 @@ function CameraScreenContent() {
         t("camera.reAnalysisSuccess") || "Meal re-analyzed successfully!"
       );
     } catch (error) {
-      setShowScanAnimation(false);
       console.error("❌ Re-analysis error:", error);
       Alert.alert(
         t("common.error") || "Error",
@@ -782,33 +730,18 @@ function CameraScreenContent() {
   };
 
   const renderAnalysisResults = () => {
-    if (!analysisData) return null;
+    if (!analysisData || !selectedImage) return null;
 
     const totalNutrition = calculateTotalNutrition();
 
     return (
       <View style={styles.resultsContainer}>
-        {/* Header */}
-        <View style={styles.resultsHeader}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <ArrowLeft size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-          <Text style={styles.resultsTitle}>{getMealName(analysisData)}</Text>
-          <TouchableOpacity style={styles.infoButton}>
-            <Info size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Nutrition Overview */}
-        <NutritionOverview
-          nutrition={totalNutrition}
+        <AnalysisResults
+          imageUri={selectedImage}
           mealName={getMealName(analysisData)}
+          nutrition={totalNutrition}
         />
 
-        {/* Action Buttons */}
         <ActionButtons
           onDelete={handleDeleteMeal}
           onReAnalyze={handleReAnalyze}
@@ -817,7 +750,6 @@ function CameraScreenContent() {
           isPosting={isPosting}
         />
 
-        {/* Ingredients List */}
         <IngredientsList
           ingredients={
             editedIngredients.length > 0
@@ -829,7 +761,6 @@ function CameraScreenContent() {
           onAddIngredient={handleAddIngredient}
         />
 
-        {/* Health Insights */}
         <HealthInsights
           recommendations={analysisData.recommendations}
           healthNotes={analysisData.healthNotes}
@@ -838,136 +769,26 @@ function CameraScreenContent() {
     );
   };
 
-  const renderScanningInterface = () => {
+  const renderSelectedImageView = () => {
     if (!selectedImage || hasBeenAnalyzed) return null;
 
     return (
-      <View style={styles.scanningContainer}>
-        {/* Header */}
-        <LinearGradient
-          colors={["#10B981", "#059669"]}
-          style={styles.scanHeader}
-        >
-          <TouchableOpacity
-            style={styles.headerButton}
-            onPress={() => {
-              setSelectedImage(null);
-              setSelectedMealType(null);
-              setShowMealTypeSelector(true);
-            }}
-          >
-            <ArrowLeft size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Scan Food</Text>
-          <TouchableOpacity style={styles.headerButton}>
-            <Info size={24} color="#FFFFFF" />
-          </TouchableOpacity>
-        </LinearGradient>
-
-        {/* Scanning Area */}
-        <View style={styles.scanArea}>
-          <View style={styles.phoneFrame}>
-            <Animated.View
-              style={[
-                styles.imageContainer,
-                { transform: [{ scale: pulseAnim }] },
-              ]}
-            >
-              <SelectedImage
-                imageUri={selectedImage}
-                userComment={userComment}
-                isAnalyzing={isAnalyzing}
-                hasBeenAnalyzed={hasBeenAnalyzed}
-                onRemoveImage={() => {
-                  resetAnalysisState();
-                  setSelectedImage(null);
-                  setShowResults(false);
-                  setSelectedMealType(null);
-                  setShowMealTypeSelector(true);
-                }}
-                onRetakePhoto={handleTakePhoto}
-                onAnalyze={handleAnalyzeImage}
-                onCommentChange={setUserComment}
-              />
-
-              {/* Scanning Lines Overlay */}
-              <View style={styles.scanOverlay}>
-                <View style={styles.scanFrame}>
-                  <View style={styles.cornerTopLeft} />
-                  <View style={styles.cornerTopRight} />
-                  <View style={styles.cornerBottomLeft} />
-                  <View style={styles.cornerBottomRight} />
-
-                  <Animated.View
-                    style={[
-                      styles.scanLine,
-                      {
-                        transform: [
-                          {
-                            translateY: scanLineAnim.interpolate({
-                              inputRange: [0, 1],
-                              outputRange: [-50, 200],
-                            }),
-                          },
-                        ],
-                      },
-                    ]}
-                  />
-                </View>
-              </View>
-            </Animated.View>
-          </View>
-
-          {/* Bottom Info */}
-          <View style={styles.scanInfo}>
-            <Text style={styles.scanTitle}>Nutritional Analysis</Text>
-            <Text style={styles.scanSubtitle}>
-              Hold your food inside the frame. It will be scanned automatically.
-            </Text>
-          </View>
-        </View>
-
-        {/* Bottom Actions */}
-        <View style={styles.bottomActions}>
-          <TouchableOpacity
-            style={styles.analyzeButton}
-            onPress={handleAnalyzeImage}
-            disabled={isAnalyzing}
-          >
-            <LinearGradient
-              colors={["#10B981", "#059669"]}
-              style={styles.analyzeButtonGradient}
-            >
-              <Zap size={24} color="#FFFFFF" />
-              <Text style={styles.analyzeButtonText}>
-                {isAnalyzing ? "Analyzing..." : "Analyze Food"}
-              </Text>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          <View style={styles.actionRow}>
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={() => {
-                setSelectedImage(null);
-                setSelectedMealType(null);
-                setShowMealTypeSelector(true);
-              }}
-            >
-              <RotateCcw size={20} color="#10B981" />
-              <Text style={styles.secondaryButtonText}>Retake</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.secondaryButton}
-              onPress={handleSelectFromGallery}
-            >
-              <ImageIcon size={20} color="#10B981" />
-              <Text style={styles.secondaryButtonText}>Gallery</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
+      <SelectedImage
+        imageUri={selectedImage}
+        userComment={userComment}
+        isAnalyzing={isAnalyzing}
+        hasBeenAnalyzed={hasBeenAnalyzed}
+        onRemoveImage={() => {
+          resetAnalysisState();
+          setSelectedImage(null);
+          setShowResults(false);
+          setSelectedMealType(null);
+          setShowMealTypeSelector(true);
+        }}
+        onRetakePhoto={handleTakePhoto}
+        onAnalyze={handleAnalyzeImage}
+        onCommentChange={setUserComment}
+      />
     );
   };
 
@@ -1207,13 +1028,10 @@ function CameraScreenContent() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#10B981" />
 
-      {/* Show meal type selector first */}
       {showMealTypeSelector && renderMealTypeSelection()}
 
-      {/* Show scanning interface when image is selected but not analyzed */}
-      {selectedImage && !hasBeenAnalyzed && renderScanningInterface()}
+      {selectedImage && !hasBeenAnalyzed && renderSelectedImageView()}
 
-      {/* Show analysis results */}
       {showResults && analysisData && (
         <ScrollView
           ref={scrollViewRef}
@@ -1228,7 +1046,6 @@ function CameraScreenContent() {
         </ScrollView>
       )}
 
-      {/* Show camera options when meal type is selected but no image */}
       {selectedMealType && !selectedImage && !showMealTypeSelector && (
         <View style={styles.cameraOptionsContainer}>
           <LinearGradient
@@ -1279,14 +1096,6 @@ function CameraScreenContent() {
 
       {renderEditModal()}
       {renderDeleteConfirmModal()}
-
-      {/* Enhanced Scanning Animation */}
-      <ScanningAnimation
-        visible={showScanAnimation}
-        onComplete={handleScanComplete}
-        progress={analysisProgress}
-        isAnalyzing={false}
-      />
     </SafeAreaView>
   );
 }
@@ -1533,217 +1342,25 @@ const styles = StyleSheet.create({
     color: "#10B981",
   },
 
-  // Scanning Interface
-  scanningContainer: {
+  // Selected Image View
+  selectedImageContainer: {
     flex: 1,
   },
-  scanHeader: {
+  selectedImageHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingTop: 60,
-    paddingBottom: 24,
-    paddingHorizontal: 24,
   },
-  scanArea: {
+  selectedImageScroll: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 24,
   },
-  phoneFrame: {
-    width: screenWidth - 80,
-    height: screenWidth - 80,
-    backgroundColor: "#1F2937",
-    borderRadius: 24,
-    padding: 8,
-    shadowColor: "#000000",
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.2,
-    shadowRadius: 24,
-    elevation: 16,
-  },
-  imageContainer: {
-    flex: 1,
-    borderRadius: 16,
-    overflow: "hidden",
-    position: "relative",
-  },
-  scanOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  scanFrame: {
-    width: 200,
-    height: 200,
-    position: "relative",
-  },
-  cornerTopLeft: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    width: 20,
-    height: 20,
-    borderTopWidth: 3,
-    borderLeftWidth: 3,
-    borderColor: "#10B981",
-  },
-  cornerTopRight: {
-    position: "absolute",
-    top: 0,
-    right: 0,
-    width: 20,
-    height: 20,
-    borderTopWidth: 3,
-    borderRightWidth: 3,
-    borderColor: "#10B981",
-  },
-  cornerBottomLeft: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    width: 20,
-    height: 20,
-    borderBottomWidth: 3,
-    borderLeftWidth: 3,
-    borderColor: "#10B981",
-  },
-  cornerBottomRight: {
-    position: "absolute",
-    bottom: 0,
-    right: 0,
-    width: 20,
-    height: 20,
-    borderBottomWidth: 3,
-    borderRightWidth: 3,
-    borderColor: "#10B981",
-  },
-  scanLine: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    height: 2,
-    backgroundColor: "#10B981",
-    shadowColor: "#10B981",
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 4,
-  },
-  scanInfo: {
-    alignItems: "center",
-    marginTop: 32,
-    paddingHorizontal: 24,
-  },
-  scanTitle: {
-    fontSize: 24,
-    fontWeight: "700",
-    color: "#1F2937",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  scanSubtitle: {
-    fontSize: 16,
-    color: "#6B7280",
-    textAlign: "center",
-    lineHeight: 24,
-  },
-  bottomActions: {
-    paddingHorizontal: 24,
-    paddingBottom: 40,
-    gap: 16,
-  },
-  analyzeButton: {
-    borderRadius: 24,
-    overflow: "hidden",
-    shadowColor: "#10B981",
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.35,
-    shadowRadius: 20,
-    elevation: 10,
-    borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.2)",
-  },
-  analyzeButtonGradient: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 22,
-    gap: 14,
-  },
-  analyzeButtonText: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#FFFFFF",
-  },
-  actionRow: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  secondaryButton: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 14,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 2,
-    borderColor: "#10B981",
-    borderRadius: 16,
-    gap: 8,
-  },
-  secondaryButtonText: {
-    fontSize: 16,
-    fontWeight: "500",
-    color: "#10B981",
-  },
+  selectedImageContent: {},
 
   // Results
   resultsContainer: {
     flex: 1,
-    backgroundColor: "#FAFBFC",
-  },
-  resultsHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 22,
-    paddingVertical: 18,
-    backgroundColor: "#007AFF",
-    elevation: 5,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(0, 0, 0, 0.1)",
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  resultsTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#FFFFFF",
-    flex: 1,
-    textAlign: "center",
-  },
-  infoButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.1)",
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: "#F8FAFC",
+    paddingTop: 20,
   },
 
   // Modals

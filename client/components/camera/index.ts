@@ -6,3 +6,4 @@ export { ActionButtons } from "./ActionButtons";
 export { HealthInsights } from "./HealthInsights";
 export { PieChart } from "./PieChart";
 export { ScanningAnimation } from "./ScanningAnimation";
+export { AnalysisResults } from "./AnalysisResults";
