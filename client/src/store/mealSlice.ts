@@ -260,7 +260,7 @@ export const analyzeMeal = createAsyncThunk(
         }
 
         const pendingMeal: PendingMeal = {
-          image_base_64: cleanBase64, // Store clean base64 without data URL prefix
+          image_base_64: cleanBase64, // Keep in memory only, don't persist
           analysis: {
             ...response.data,
             meal_period:
@@ -270,62 +270,19 @@ export const analyzeMeal = createAsyncThunk(
         };
         console.log("Pending meal created:", pendingMeal);
 
-        // Save to storage with improved error handling
+        // Save ONLY analysis to storage (NEVER store base64 images in AsyncStorage!)
         try {
-          const serializedMeal = JSON.stringify(pendingMeal);
-
-          // Check storage availability before saving
-          const hasSpace = await StorageCleanupService.checkAvailableStorage();
-          if (!hasSpace) {
-            console.warn("⚠️ Storage full, running cleanup before saving");
-            await StorageCleanupService.emergencyCleanup();
-          }
+          const storageData = {
+            analysis: pendingMeal.analysis,
+            timestamp: pendingMeal.timestamp,
+          };
+          const serializedMeal = JSON.stringify(storageData);
 
           await AsyncStorage.setItem(PENDING_MEAL_KEY, serializedMeal);
-          console.log("Pending meal saved to storage successfully");
+          console.log("Pending meal analysis saved to storage successfully");
         } catch (storageError: any) {
           console.warn("Failed to save pending meal to storage:", storageError);
-
-          // If storage is full, try emergency cleanup and retry
-          if (
-            storageError?.message?.includes("disk is full") ||
-            storageError?.message?.includes("SQLITE_FULL") ||
-            storageError?.code === 13 ||
-            storageError?.message?.includes("database or disk is full")
-          ) {
-            try {
-              await StorageCleanupService.emergencyCleanup();
-
-              // Retry saving after emergency cleanup
-              const compactMeal = {
-                analysis: pendingMeal.analysis,
-                timestamp: pendingMeal.timestamp,
-                // Skip image_base_64 if storage is critically full
-              };
-
-              const compactSerialized = JSON.stringify(compactMeal);
-              await AsyncStorage.setItem(PENDING_MEAL_KEY, compactSerialized);
-              console.log(
-                "Pending meal saved after emergency cleanup (without image)"
-              );
-
-              // Update the pending meal to reflect what was actually saved
-              const updatedPendingMeal = {
-                ...pendingMeal,
-                image_base_64: "", // Clear image to match what was saved
-              };
-
-              return updatedPendingMeal;
-            } catch (retryError) {
-              console.error(
-                "Failed to save even after emergency cleanup:",
-                retryError
-              );
-              // Continue without saving to storage, analysis is still in memory
-              // Return the meal without storage persistence
-              return pendingMeal;
-            }
-          }
+          // Continue without storage - meal is still in memory and will be posted
         }
 
         console.log("Analysis completed successfully");
@@ -641,24 +598,31 @@ export const loadPendingMeal = createAsyncThunk(
 
       if (stored && stored.trim() !== "") {
         try {
-          const pendingMeal = JSON.parse(stored);
-          console.log("Pending meal loaded from storage:", pendingMeal);
+          const storedData = JSON.parse(stored);
+          console.log("Pending meal loaded from storage:", storedData);
 
           // Validate the loaded data structure
           if (
-            pendingMeal &&
-            typeof pendingMeal === "object" &&
-            pendingMeal.timestamp
+            storedData &&
+            typeof storedData === "object" &&
+            storedData.timestamp
           ) {
             // Check if the pending meal is too old (more than 24 hours)
             const now = Date.now();
-            const ageHours = (now - pendingMeal.timestamp) / (1000 * 60 * 60);
+            const ageHours = (now - storedData.timestamp) / (1000 * 60 * 60);
 
             if (ageHours > 24) {
               console.log("⏰ Pending meal is too old, clearing it");
               await AsyncStorage.removeItem(PENDING_MEAL_KEY);
               return null;
             }
+
+            // Reconstruct pending meal (without image since it's not stored)
+            const pendingMeal = {
+              analysis: storedData.analysis,
+              timestamp: storedData.timestamp,
+              image_base_64: "", // Image not persisted, will be empty on reload
+            };
 
             return pendingMeal;
           } else {

@@ -16,7 +16,7 @@ import { BlurView } from "expo-blur";
 import { LinearGradient } from "expo-linear-gradient";
 import { t } from "i18next";
 
-const { width, height } = Dimensions.get("window");
+const { width } = Dimensions.get("window");
 
 interface SelectedImageProps {
   imageUri: string;
@@ -100,10 +100,6 @@ export const SelectedImage: React.FC<SelectedImageProps> = ({
     outputRange: [-100, 400],
   });
 
-  const handleSearchPress = () => {
-    setShowDetailsInput(true);
-  };
-
   const handleStartAnalysis = () => {
     setShowDetailsInput(false);
     onAnalyze();
@@ -111,7 +107,7 @@ export const SelectedImage: React.FC<SelectedImageProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Full Screen Image */}
+      {/* Image */}
       <Animated.View style={[styles.imageContainer, { opacity: fadeAnim }]}>
         <Image
           source={{ uri: imageUri }}
@@ -121,7 +117,7 @@ export const SelectedImage: React.FC<SelectedImageProps> = ({
 
         <View style={styles.darkTint} />
 
-        {/* Top Buttons */}
+        {/* Top Actions */}
         <View style={styles.topActions}>
           <TouchableOpacity
             style={styles.topButton}
@@ -144,7 +140,7 @@ export const SelectedImage: React.FC<SelectedImageProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* Scanning */}
+        {/* Scanning Overlay */}
         {isAnalyzing && (
           <View style={styles.scanningOverlay}>
             <Animated.View
@@ -164,102 +160,84 @@ export const SelectedImage: React.FC<SelectedImageProps> = ({
                 ]}
               />
             </Animated.View>
-            <Text style={styles.scanningText}>Scanning</Text>
+
+            <Text style={styles.scanningText}>
+              {t("camera.scanningSteps.analyzing")}
+            </Text>
           </View>
         )}
       </Animated.View>
 
       {/* Initial State */}
       {!isAnalyzing && !hasBeenAnalyzed && !showDetailsInput && (
-        <Animated.View
-          style={[
-            styles.bottomContent,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideUpAnim }],
-            },
-          ]}
-        >
+        <Animated.View style={[styles.bottomContent, { opacity: fadeAnim }]}>
           <BlurView intensity={90} tint="dark" style={styles.bottomCard}>
             <TouchableOpacity
               style={styles.searchButton}
-              onPress={handleSearchPress}
+              onPress={() => setShowDetailsInput(true)}
               activeOpacity={0.8}
             >
               <View style={styles.searchIcon}>
                 <Search size={22} color="#F59E0B" strokeWidth={2.5} />
               </View>
             </TouchableOpacity>
-            <Text style={styles.promptText}>Tap to analyze</Text>
+
+            <Text style={styles.promptText}>
+              {t("camera.getNutritionInfo")}
+            </Text>
           </BlurView>
         </Animated.View>
       )}
 
-      {/* Details State */}
+      {/* Details Input */}
       {!isAnalyzing && !hasBeenAnalyzed && showDetailsInput && (
-        <Animated.View
-          style={[
-            styles.bottomContent,
-            {
-              opacity: fadeAnim,
-            },
-          ]}
-        >
+        <Animated.View style={[styles.bottomContent, { opacity: fadeAnim }]}>
           <BlurView intensity={90} tint="dark" style={styles.detailsCard}>
             <TextInput
               style={styles.input}
               value={userComment}
               onChangeText={onCommentChange}
-              placeholder="Add notes (optional)..."
-              placeholderTextColor="rgba(255, 255, 255, 0.4)"
+              placeholder={t("camera.detailsPlaceholder")}
+              placeholderTextColor="rgba(255,255,255,0.4)"
               multiline
               autoFocus
             />
+
             <View style={styles.actions}>
               <TouchableOpacity
                 style={styles.skipBtn}
                 onPress={handleStartAnalysis}
                 activeOpacity={0.7}
               >
-                <Text style={styles.skipText}>Skip</Text>
+                <Text style={styles.skipText}>{t("camera.reanalyze")}</Text>
               </TouchableOpacity>
+
               <TouchableOpacity
                 style={styles.analyzeBtn}
                 onPress={handleStartAnalysis}
                 activeOpacity={0.9}
               >
-                <LinearGradient
-                  colors={["#10B981", "#059669"]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.analyzeBtnGradient}
-                >
+                <View style={styles.analyzeBtnGradient}>
                   <Check size={16} color="#FFFFFF" strokeWidth={2.5} />
-                  <Text style={styles.analyzeText}>Analyze</Text>
-                </LinearGradient>
+                  <Text style={styles.analyzeText}>
+                    {t("camera.analyzeMeal")}
+                  </Text>
+                </View>
               </TouchableOpacity>
             </View>
           </BlurView>
         </Animated.View>
       )}
 
-      {/* Analyzing State */}
+      {/* Analyzing Bottom */}
       {isAnalyzing && (
-        <Animated.View
-          style={[
-            styles.bottomContent,
-            {
-              opacity: fadeAnim,
-            },
-          ]}
-        >
+        <Animated.View style={[styles.bottomContent, { opacity: fadeAnim }]}>
           <BlurView intensity={90} tint="dark" style={styles.bottomCard}>
-            <View style={styles.searchButton}>
-              <View style={styles.searchIcon}>
-                <ActivityIndicator size={22} color="#F59E0B" />
-              </View>
+            <View style={styles.searchIcon}>
+              <ActivityIndicator size={22} color="#F59E0B" />
             </View>
-            <Text style={styles.promptText}>Searching...</Text>
+
+            <Text style={styles.promptText}>{t("camera.analyzing")}</Text>
           </BlurView>
         </Animated.View>
       )}
@@ -270,9 +248,8 @@ export const SelectedImage: React.FC<SelectedImageProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#000000",
+    backgroundColor: "#000",
   },
-
   imageContainer: {
     ...StyleSheet.absoluteFillObject,
   },
@@ -283,9 +260,8 @@ const styles = StyleSheet.create({
   },
   darkTint: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.15)",
+    backgroundColor: "rgba(0,0,0,0.15)",
   },
-
   topActions: {
     position: "absolute",
     top: Platform.OS === "ios" ? 56 : 20,
@@ -305,7 +281,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-
   scanningOverlay: {
     ...StyleSheet.absoluteFillObject,
     justifyContent: "center",
@@ -314,7 +289,6 @@ const styles = StyleSheet.create({
   scannerFrame: {
     width: width * 0.7,
     height: width * 0.8,
-    position: "relative",
   },
   cornerTopLeft: {
     position: "absolute",
@@ -325,7 +299,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 4,
     borderLeftWidth: 4,
     borderColor: "#10B981",
-    borderTopLeftRadius: 8,
   },
   cornerTopRight: {
     position: "absolute",
@@ -336,7 +309,6 @@ const styles = StyleSheet.create({
     borderTopWidth: 4,
     borderRightWidth: 4,
     borderColor: "#10B981",
-    borderTopRightRadius: 8,
   },
   cornerBottomLeft: {
     position: "absolute",
@@ -347,7 +319,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 4,
     borderLeftWidth: 4,
     borderColor: "#10B981",
-    borderBottomLeftRadius: 8,
   },
   cornerBottomRight: {
     position: "absolute",
@@ -358,7 +329,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 4,
     borderRightWidth: 4,
     borderColor: "#10B981",
-    borderBottomRightRadius: 8,
   },
   scannerLine: {
     position: "absolute",
@@ -371,41 +341,32 @@ const styles = StyleSheet.create({
     marginTop: 30,
     fontSize: 18,
     fontWeight: "600",
-    color: "#FFFFFF",
-    letterSpacing: 0.5,
+    color: "#FFF",
   },
-
   bottomContent: {
     position: "absolute",
     bottom: -30,
     left: 0,
     right: 0,
-    paddingBottom: Platform.OS === "ios" ? 40 : 24,
   },
-
   bottomCard: {
-    borderTopStartRadius: 30,
-    borderTopEndRadius: 30,
-    overflow: "hidden",
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
     paddingVertical: 24,
     paddingHorizontal: 20,
     alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.2)",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
-    backgroundColor: "rgba(0, 0, 0, 0.2)",
+    borderColor: "rgba(255,255,255,0.1)",
   },
-
   detailsCard: {
-    borderTopStartRadius: 30,
-    borderTopEndRadius: 30,
-    overflow: "hidden",
-    paddingVertical: 18,
-    paddingHorizontal: 18,
+    borderTopLeftRadius: 30,
+    borderTopRightRadius: 30,
+    padding: 18,
+    backgroundColor: "rgba(0,0,0,0.2)",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
-    backgroundColor: "rgba(0, 0, 0, 0.2)",
+    borderColor: "rgba(255,255,255,0.1)",
   },
-
   searchButton: {
     marginBottom: 10,
   },
@@ -413,33 +374,28 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: "rgba(254, 243, 199, 0.15)",
+    backgroundColor: "rgba(254,243,199,0.15)",
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "rgba(245, 158, 11, 0.3)",
+    borderColor: "rgba(245,158,11,0.3)",
   },
-
   promptText: {
     fontSize: 14,
     fontWeight: "500",
-    color: "rgba(255, 255, 255, 0.8)",
-    textAlign: "center",
+    color: "rgba(255,255,255,0.8)",
   },
-
   input: {
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    padding: 14,
     fontSize: 14,
-    color: "#FFFFFF",
+    color: "#FFF",
     minHeight: 60,
-    marginBottom: 12,
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
+    borderColor: "rgba(255,255,255,0.1)",
+    marginBottom: 12,
   },
-
   actions: {
     flexDirection: "row",
     gap: 8,
@@ -448,15 +404,14 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 11,
     borderRadius: 12,
-    backgroundColor: "rgba(255, 255, 255, 0.08)",
+    backgroundColor: "rgba(255,255,255,0.08)",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: "rgba(255, 255, 255, 0.1)",
+    borderColor: "rgba(255,255,255,0.1)",
   },
   skipText: {
-    fontSize: 14,
+    color: "rgba(255,255,255,0.7)",
     fontWeight: "600",
-    color: "rgba(255, 255, 255, 0.7)",
   },
   analyzeBtn: {
     flex: 2,
@@ -471,8 +426,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   analyzeText: {
-    fontSize: 14,
+    color: "#FFF",
     fontWeight: "700",
-    color: "#FFFFFF",
   },
 });

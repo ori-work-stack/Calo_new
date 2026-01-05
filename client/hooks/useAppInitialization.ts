@@ -7,6 +7,7 @@ import NotificationService from "@/src/services/notificationService";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useTranslation } from "react-i18next";
 import { StorageCleanupService } from "@/src/utils/storageCleanup";
+import { StorageRecoveryService } from "@/src/utils/storageRecovery";
 import { loadStoredAuth } from "../src/store/authSlice";
 
 interface AppInitializationState {
@@ -74,7 +75,11 @@ export const useAppInitialization = (): AppInitializationState => {
       try {
         console.log("🚀 Initializing app...");
 
-        // 1. Check and cleanup storage first
+        // 0. Run storage recovery first (fixes CursorWindow errors)
+        console.log("🔧 Running storage recovery...");
+        await StorageRecoveryService.performFullRecovery();
+
+        // 1. Check and cleanup storage
         const storageHealthy =
           await StorageCleanupService.checkAndCleanupIfNeeded();
         if (!storageHealthy) {

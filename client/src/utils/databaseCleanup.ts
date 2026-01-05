@@ -135,56 +135,28 @@ export class DatabaseCleanupService {
   }
 
   /**
-   * Optimize image storage
+   * Remove any images accidentally stored in AsyncStorage
    */
-  static async optimizeImageStorage(): Promise<void> {
+  static async removeStoredImages(): Promise<void> {
     try {
       const keys = await AsyncStorage.getAllKeys();
       const imageKeys = keys.filter(
         (key) =>
           key.includes("image_") ||
           key.includes("avatar_") ||
-          key.includes("meal_photo_")
+          key.includes("meal_photo_") ||
+          key.includes("base64_") ||
+          key.includes("photo_")
       );
 
-      for (const key of imageKeys) {
-        const value = await AsyncStorage.getItem(key);
-        if (value) {
-          const size = new Blob([value]).size;
-
-          // If image is larger than 500KB, compress it
-          if (size > 500 * 1024) {
-            try {
-              const compressedImage = await this.compressBase64Image(value);
-              await AsyncStorage.setItem(key, compressedImage);
-              console.log(`🖼️ Compressed image: ${key}`);
-            } catch (error) {
-              console.error(`Failed to compress image ${key}:`, error);
-            }
-          }
-        }
+      if (imageKeys.length > 0) {
+        await AsyncStorage.multiRemove(imageKeys);
+        console.log(
+          `🗑️ Removed ${imageKeys.length} image entries from AsyncStorage`
+        );
       }
     } catch (error) {
-      console.error("Error optimizing image storage:", error);
-    }
-  }
-
-  /**
-   * Compress base64 image
-   */
-  private static async compressBase64Image(base64: string): Promise<string> {
-    // Simple compression by reducing quality
-    // In a real implementation, you might use a proper image compression library
-    try {
-      // Remove data URL prefix if present
-      const base64Data = base64.replace(/^data:image\/[a-z]+;base64,/, "");
-
-      // For now, just return the original if it's already reasonable size
-      // You could implement actual image compression here
-      return base64;
-    } catch (error) {
-      console.error("Error compressing image:", error);
-      return base64;
+      console.error("Error removing stored images:", error);
     }
   }
 
@@ -211,11 +183,63 @@ export class DatabaseCleanupService {
   }
 
   /**
-   * Emergency cleanup when storage is full
+   * Remove oversized entries that cause CursorWindow errors
+   */
+  static async removeOversizedEntries(): Promise<number> {
+    let removed = 0;
+    try {
+      console.log("🔍 Scanning for oversized AsyncStorage entries...");
+
+      const keys = await AsyncStorage.getAllKeys();
+      const MAX_SAFE_SIZE = 100 * 1024; // 100KB - be conservative
+
+      for (const key of keys) {
+        try {
+          const value = await AsyncStorage.getItem(key);
+          if (value) {
+            const size = new Blob([value]).size;
+
+            if (size > MAX_SAFE_SIZE) {
+              await AsyncStorage.removeItem(key);
+              console.log(
+                `🗑️ Removed oversized entry: ${key} (${(size / 1024).toFixed(
+                  1
+                )}KB)`
+              );
+              removed++;
+            }
+          }
+        } catch (itemError) {
+          // If we can't even read it, it's likely corrupted or too large - remove it
+          try {
+            await AsyncStorage.removeItem(key);
+            console.log(`🗑️ Removed unreadable entry: ${key}`);
+            removed++;
+          } catch (removeError) {
+            console.error(`Failed to remove ${key}:`, removeError);
+          }
+        }
+      }
+
+      console.log(`✅ Removed ${removed} oversized entries`);
+    } catch (error) {
+      console.error("Error removing oversized entries:", error);
+    }
+    return removed;
+  }
+
+  /**
+   * Emergency cleanup when storage is full or has CursorWindow errors
    */
   static async emergencyCleanup(): Promise<void> {
     try {
       console.log("🚨 Emergency cleanup triggered");
+
+      // First, remove oversized entries (primary cause of CursorWindow errors)
+      await this.removeOversizedEntries();
+
+      // Remove any stored images
+      await this.removeStoredImages();
 
       // Remove all cache items
       const keys = await AsyncStorage.getAllKeys();
@@ -270,6 +294,11 @@ export class DatabaseCleanupService {
 // Auto-cleanup on app start
 export const initializeStorageCleanup = async (): Promise<void> => {
   try {
+    // Immediately remove any oversized entries that could cause CursorWindow errors
+    console.log("🧹 Running startup cleanup...");
+    await DatabaseCleanupService.removeOversizedEntries();
+    await DatabaseCleanupService.removeStoredImages();
+
     await DatabaseCleanupService.monitorStorage();
     await DatabaseCleanupService.clearExpiredSessions();
 
@@ -279,5 +308,11 @@ export const initializeStorageCleanup = async (): Promise<void> => {
     }, 5 * 60 * 1000); // Every 5 minutes
   } catch (error) {
     console.error("Error initializing storage cleanup:", error);
+    // If cleanup fails, try emergency cleanup
+    try {
+      await DatabaseCleanupService.emergencyCleanup();
+    } catch (emergencyError) {
+      console.error("Emergency cleanup also failed:", emergencyError);
+    }
   }
 };

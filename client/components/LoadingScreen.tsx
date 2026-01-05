@@ -138,8 +138,6 @@ const FlowerIcon = ({ size = 48 }) => (
   </Svg>
 );
 
-const icons = [LeafIcon, SeedlingIcon, TreeIcon, FlowerIcon];
-
 export default function LoadingScreen({
   text = "Loading...",
   size = "large",
@@ -211,16 +209,7 @@ export default function LoadingScreen({
         }),
       ])
     ).start();
-
-    // Icon cycling
-    const iconInterval = setInterval(() => {
-      setCurrentIcon((prev) => (prev + 1) % icons.length);
-    }, 1800);
-
-    return () => clearInterval(iconInterval);
   }, []);
-
-  const CurrentIcon = icons[currentIcon];
 
   const rotation = iconRotateAnim.interpolate({
     inputRange: [0, 1],
@@ -244,19 +233,6 @@ export default function LoadingScreen({
           },
         ]}
       >
-        {/* iOS-style main icon container */}
-        <Animated.View
-          style={[
-            styles.iconContainer,
-            dynamicStyles.iconContainer,
-            {
-              transform: [{ scale: iconScaleAnim }, { rotate: rotation }],
-            },
-          ]}
-        >
-          <CurrentIcon size={56} />
-        </Animated.View>
-
         {/* iOS-style loading text */}
         <Text style={[styles.loadingText, { color: colors.text }]}>{text}</Text>
 

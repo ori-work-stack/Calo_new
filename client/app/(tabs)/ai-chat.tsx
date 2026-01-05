@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Dimensions,
+  Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -21,7 +22,6 @@ import {
   AlertTriangle,
   Shield,
   Trash2,
-  Sparkles,
 } from "lucide-react-native";
 import { useTranslation } from "react-i18next";
 import { useLanguage } from "@/src/i18n/context/LanguageContext";
@@ -56,8 +56,8 @@ export default function AIChatScreen({
   });
   const [isLoading, setIsLoading] = useState(true);
   const scrollViewRef = useRef<ScrollView>(null);
-  const isRTL = i18n.language === "he";
-  const { theme, colors, isDark } = useTheme();
+  const isRTL = language === "he";
+  const { colors, emeraldSpectrum } = useTheme();
 
   const getCommonQuestions = () => [
     t("ai_chat.common_questions.weight_loss"),
@@ -74,7 +74,7 @@ export default function AIChatScreen({
           Alert.alert(
             t("common.upgradeRequired") || "Upgrade Required",
             t("ai_chat.upgrade_message") ||
-              "AI Chat is not available on the Free plan. Please upgrade to Gold or Platinum plan to access this feature.",
+              "AI Chat is not available on the Free plan.",
             [
               {
                 text: t("common.cancel") || "Cancel",
@@ -95,7 +95,7 @@ export default function AIChatScreen({
           Alert.alert(
             t("common.upgradeRequired") || "Upgrade Required",
             t("ai_chat.upgrade_message") ||
-              "AI Chat is not available on the Free plan. Please upgrade to Gold or Platinum plan to access this feature.",
+              "AI Chat is not available on the Free plan.",
             [
               {
                 text: t("common.cancel") || "Cancel",
@@ -118,7 +118,6 @@ export default function AIChatScreen({
         router.replace("/(tabs)");
       }
     };
-
     checkAccess();
   }, [user]);
 
@@ -128,34 +127,22 @@ export default function AIChatScreen({
 
   const loadUserProfile = async () => {
     try {
-      console.log("🔄 Loading user profile from questionnaire...");
       const response = await questionnaireAPI.getQuestionnaire();
-
       if (response.success && response.data) {
-        const questionnaire = response.data;
-
-        const profile: UserProfile = {
-          allergies: Array.isArray(questionnaire.allergies)
-            ? questionnaire.allergies
-            : questionnaire.allergies_text || [],
-          medicalConditions: Array.isArray(
-            questionnaire.medical_conditions_text
-          )
-            ? questionnaire.medical_conditions_text
+        const q = response.data;
+        setUserProfile({
+          allergies: Array.isArray(q.allergies)
+            ? q.allergies
+            : q.allergies_text || [],
+          medicalConditions: Array.isArray(q.medical_conditions_text)
+            ? q.medical_conditions_text
             : [],
-          dietaryPreferences: questionnaire.dietary_style
-            ? [questionnaire.dietary_style]
-            : [],
-          goals: questionnaire.main_goal ? [questionnaire.main_goal] : [],
-        };
-
-        setUserProfile(profile);
-        console.log("✅ User profile loaded:", profile);
-      } else {
-        console.log("⚠️ No questionnaire data found, using empty profile");
+          dietaryPreferences: q.dietary_style ? [q.dietary_style] : [],
+          goals: q.main_goal ? [q.main_goal] : [],
+        });
       }
     } catch (error) {
-      console.error("💥 Error loading user profile:", error);
+      console.error("Error loading profile:", error);
     } finally {
       setIsLoading(false);
     }
@@ -163,15 +150,8 @@ export default function AIChatScreen({
 
   const loadChatHistory = async () => {
     try {
-      console.log("📜 Loading chat history...");
       const response = await chatAPI.getChatHistory(20);
-
-      if (
-        response &&
-        response.success &&
-        response.data &&
-        response.data.length > 0
-      ) {
+      if (response?.success && response.data?.length > 0) {
         const chatMessages: Message[] = response.data
           .map((msg: any) => [
             {
@@ -190,9 +170,7 @@ export default function AIChatScreen({
             },
           ])
           .flat();
-
         setMessages(chatMessages);
-        console.log("✅ Loaded", chatMessages.length, "chat messages");
       } else {
         setMessages([
           {
@@ -205,7 +183,6 @@ export default function AIChatScreen({
         ]);
       }
     } catch (error) {
-      console.error("💥 Error loading chat history:", error);
       setMessages([
         {
           id: "welcome",
@@ -218,160 +195,77 @@ export default function AIChatScreen({
     }
   };
 
-  const checkForAllergens = (messageContent: string): string[] => {
-    if (!userProfile.allergies || userProfile.allergies.length === 0) {
-      return [];
-    }
-
-    const allergenMap: Record<string, string[]> = {
-      nuts: [
-        "אגוזים",
-        "בוטנים",
-        "שקדים",
-        "אגוז",
-        "לוז",
-        "nuts",
-        "peanuts",
-        "almonds",
-        "walnuts",
-      ],
-      dairy: [
-        "חלב",
-        "גבינה",
-        "יוגורט",
-        "חמאה",
-        "dairy",
-        "milk",
-        "cheese",
-        "yogurt",
-        "butter",
-      ],
-      gluten: [
-        "חיטה",
-        "קמח",
-        "לחם",
-        "פסטה",
-        "wheat",
-        "flour",
-        "bread",
-        "pasta",
-        "gluten",
-      ],
-      eggs: ["ביצים", "ביצה", "eggs", "egg"],
-      fish: ["דג", "דגים", "סלמון", "טונה", "fish", "salmon", "tuna"],
-      soy: ["סויה", "טופו", "soy", "tofu"],
-      shellfish: [
-        "סרטנים",
-        "לובסטר",
-        "שרימפס",
-        "shellfish",
-        "crab",
-        "lobster",
-        "shrimp",
-      ],
+  const checkForAllergens = (content: string): string[] => {
+    if (!userProfile.allergies?.length) return [];
+    const map: Record<string, string[]> = {
+      nuts: ["אגוזים", "בוטנים", "nuts", "peanuts", "almonds"],
+      dairy: ["חלב", "גבינה", "dairy", "milk", "cheese"],
+      gluten: ["חיטה", "קמח", "wheat", "flour"],
+      eggs: ["ביצים", "eggs"],
+      fish: ["דג", "fish", "salmon"],
     };
-
-    const foundAllergens: string[] = [];
-
-    userProfile.allergies.forEach((allergy) => {
-      const allergyLower = allergy.toLowerCase();
-
-      if (messageContent.toLowerCase().includes(allergyLower)) {
-        foundAllergens.push(allergy);
-        return;
-      }
-
-      const mappedKeywords = allergenMap[allergyLower];
-      if (mappedKeywords) {
-        const hasAllergen = mappedKeywords.some((keyword) =>
-          messageContent.toLowerCase().includes(keyword.toLowerCase())
-        );
-        if (hasAllergen) {
-          foundAllergens.push(allergy);
-        }
-      }
+    const found: string[] = [];
+    userProfile.allergies.forEach((a) => {
+      if (content.toLowerCase().includes(a.toLowerCase())) found.push(a);
+      else if (
+        map[a.toLowerCase()]?.some((k) => content.toLowerCase().includes(k))
+      )
+        found.push(a);
     });
-
-    return foundAllergens;
+    return found;
   };
 
   const sendMessage = async () => {
     if (!inputText.trim()) return;
-
-    const userMessage: Message = {
+    const userMsg: Message = {
       id: `user-${Date.now()}`,
       type: "user",
       content: inputText.trim(),
       timestamp: new Date(),
     };
-
-    setMessages((prev) => [...prev, userMessage]);
-    const currentMessage = inputText.trim();
+    setMessages((p) => [...p, userMsg]);
+    const msg = inputText.trim();
     setInputText("");
     setIsTyping(true);
 
     try {
-      console.log("💬 Sending message to AI:", currentMessage);
-
-      const response = await chatAPI.sendMessage(
-        currentMessage,
+      const res = await chatAPI.sendMessage(
+        msg,
         language === "he" ? "hebrew" : "english"
       );
+      let aiContent = "";
+      if (res.success && res.response)
+        aiContent = res.response.response || res.response;
+      else if (res.response?.response) aiContent = res.response.response;
+      else if (typeof res.response === "string") aiContent = res.response;
+      else if (typeof res === "string") aiContent = res;
+      else throw new Error("Invalid response");
 
-      console.log("🔍 Full API response structure:", response);
+      if (!aiContent.trim()) throw new Error("Empty response");
 
-      let aiResponseContent = "";
-      let responseData = null;
-
-      if (response.success && response.response) {
-        responseData = response.response;
-        aiResponseContent = response.response.response || response.response;
-      } else if (response.response && response.response.response) {
-        responseData = response.response;
-        aiResponseContent = response.response.response;
-      } else if (response.response && typeof response.response === "string") {
-        aiResponseContent = response.response;
-      } else if (typeof response === "string") {
-        aiResponseContent = response;
-      } else {
-        console.error("🚨 Unexpected response format:", response);
-        throw new Error("Invalid response format from server");
-      }
-
-      if (!aiResponseContent || aiResponseContent.trim() === "") {
-        throw new Error("Empty response from AI");
-      }
-
-      console.log("✅ Extracted AI response content:", aiResponseContent);
-
-      const allergens = checkForAllergens(aiResponseContent);
-
-      const aiMessage: Message = {
+      const allergens = checkForAllergens(aiContent);
+      const aiMsg: Message = {
         id: `bot-${Date.now()}`,
         type: "bot",
-        content: aiResponseContent,
+        content: aiContent,
         timestamp: new Date(),
         hasWarning: allergens.length > 0,
-        allergenWarning: allergens.length > 0 ? allergens : undefined,
+        allergenWarning: allergens.length ? allergens : undefined,
         suggestions:
           Math.random() > 0.7 ? getCommonQuestions().slice(0, 3) : undefined,
       };
-
-      setMessages((prev) => [...prev, aiMessage]);
-      console.log("✅ AI response received and displayed successfully");
+      setMessages((p) => [...p, aiMsg]);
     } catch (error) {
-      console.error("💥 Error sending message:", error);
-
-      const errorMessage: Message = {
-        id: `error-${Date.now()}`,
-        type: "bot",
-        content: t("ai_chat.error.serverError"),
-        timestamp: new Date(),
-        hasWarning: true,
-      };
-
-      setMessages((prev) => [...prev, errorMessage]);
-
+      setMessages((p) => [
+        ...p,
+        {
+          id: `error-${Date.now()}`,
+          type: "bot",
+          content: t("ai_chat.error.serverError"),
+          timestamp: new Date(),
+          hasWarning: true,
+        },
+      ]);
       Alert.alert(t("ai_chat.error.title"), t("ai_chat.error.networkError"));
     } finally {
       setIsTyping(false);
@@ -396,83 +290,110 @@ export default function AIChatScreen({
                 suggestions: getCommonQuestions(),
               },
             ]);
-            console.log("🗑️ Chat history cleared");
-          } catch (error) {
-            console.error("💥 Error clearing chat:", error);
-            console.log("⚠️ Failed to clear chat history, but continuing");
+          } catch (e) {
+            console.error(e);
           }
         },
       },
     ]);
   };
 
-  const selectSuggestion = (suggestion: string) => {
-    setInputText(suggestion);
-  };
-
-  const formatTime = (date: Date) => {
-    return date.toLocaleTimeString(language === "he" ? "he-IL" : "en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  const renderMessage = (message: Message) => {
-    const isUser = message.type === "user";
-
+  const renderMessage = (msg: Message) => {
+    const isUser = msg.type === "user";
     return (
       <Animated.View
         entering={FadeInDown.delay(50).duration(300)}
-        key={message.id}
-        style={styles.messageContainer}
+        key={msg.id}
+        style={s.msgContainer}
       >
-        <View style={[styles.messageRow, isUser && styles.userMessageRow]}>
+        <View
+          style={[
+            s.msgRow,
+            isUser && (isRTL ? s.userRTL : s.userLTR),
+            !isUser && isRTL && s.botRTL,
+          ]}
+        >
           {!isUser && (
-            <View style={styles.botIconContainer}>
-              <Bot size={20} color="#16A085" />
+            <View style={[s.botIcon, { backgroundColor: colors.card }]}>
+              <Bot size={16} color={emeraldSpectrum.emerald500} />
             </View>
           )}
-
-          <View style={styles.messageContentContainer}>
+          <View style={s.msgContent}>
             <View
               style={[
-                styles.messageBubble,
-                isUser ? styles.userBubble : styles.botBubble,
-                message.hasWarning && styles.warningBubble,
+                s.bubble,
+                { backgroundColor: isUser ? colors.card : colors.surface },
+                msg.hasWarning && s.warnBubble,
               ]}
             >
-              {message.hasWarning && (
-                <View style={styles.warningBanner}>
-                  <AlertTriangle size={16} color="#E74C3C" />
-                  <Text style={styles.warningText}>
-                    {t("ai_chat.allergenWarning")}
+              {msg.hasWarning && (
+                <View style={s.warnBanner}>
+                  <AlertTriangle size={12} color={colors.error} />
+                  <Text style={[s.warnText, { color: colors.error }]}>
+                    {t("ai_chat.allergen_warning")}
                   </Text>
                 </View>
               )}
-
-              <Text style={[styles.messageText, isUser && styles.userText]}>
-                {message.content}
+              <Text
+                style={[
+                  s.msgText,
+                  { color: colors.text, textAlign: isRTL ? "right" : "left" },
+                ]}
+              >
+                {msg.content}
               </Text>
-
-              <Text style={[styles.timestamp, isUser && styles.userTimestamp]}>
-                {formatTime(message.timestamp)}
+              <Text
+                style={[
+                  s.time,
+                  {
+                    color: colors.textTertiary,
+                    textAlign:
+                      isRTL && isUser
+                        ? "left"
+                        : isRTL
+                        ? "right"
+                        : isUser
+                        ? "right"
+                        : "left",
+                  },
+                ]}
+              >
+                {msg.timestamp.toLocaleTimeString(
+                  language === "he" ? "he-IL" : "en-US",
+                  { hour: "2-digit", minute: "2-digit" }
+                )}
               </Text>
             </View>
-
-            {message.suggestions && (
-              <View style={styles.suggestionsContainer}>
-                <Text style={styles.suggestionsLabel}>
+            {msg.suggestions && (
+              <View style={s.suggests}>
+                <Text
+                  style={[
+                    s.sugLabel,
+                    {
+                      color: colors.textSecondary,
+                      textAlign: isRTL ? "right" : "left",
+                    },
+                  ]}
+                >
                   {t("ai_chat.ask_anything")}
                 </Text>
-                <View style={styles.suggestionsGrid}>
-                  {message.suggestions.map((suggestion, index) => (
+                <View style={s.sugGrid}>
+                  {msg.suggestions.map((sug, i) => (
                     <TouchableOpacity
-                      key={index}
-                      style={styles.suggestionButton}
-                      onPress={() => selectSuggestion(suggestion)}
+                      key={i}
+                      style={[
+                        s.sugBtn,
+                        {
+                          backgroundColor: colors.card,
+                          borderColor: colors.border,
+                        },
+                      ]}
+                      onPress={() => setInputText(sug)}
                     >
-                      <Text style={styles.suggestionButtonText}>
-                        {suggestion}
+                      <Text
+                        style={[s.sugBtnText, { color: colors.textSecondary }]}
+                      >
+                        {sug}
                       </Text>
                     </TouchableOpacity>
                   ))}
@@ -480,10 +401,15 @@ export default function AIChatScreen({
               </View>
             )}
           </View>
-
           {isUser && (
-            <View style={styles.userIconContainer}>
-              <User size={20} color="#FFFFFF" />
+            <View
+              style={[s.userIcon, { backgroundColor: colors.surfaceVariant }]}
+            >
+              {user?.avatar_url ? (
+                <Image source={{ uri: user.avatar_url }} style={s.profImg} />
+              ) : (
+                <User size={16} color={colors.text} />
+              )}
             </View>
           )}
         </View>
@@ -491,87 +417,113 @@ export default function AIChatScreen({
     );
   };
 
-  if (isLoading) {
-    return <LoadingScreen text={t("ai_chat.loading")} />;
-  }
+  if (isLoading) return <LoadingScreen text={t("ai_chat.loading")} />;
 
   return (
-    <SafeAreaView
-      style={[styles.container, { backgroundColor: colors.background }]}
-    >
-      {/* Scrollable Content with Input */}
+    <SafeAreaView style={[s.container, { backgroundColor: colors.background }]}>
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={styles.keyboardAvoidingView}
+        style={{ flex: 1 }}
         keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 20}
       >
-        <ScrollView
-          ref={scrollViewRef}
-          style={styles.messagesContainer}
-          contentContainerStyle={styles.messagesContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
+        <View
+          style={[
+            s.header,
+            {
+              backgroundColor: colors.background,
+              borderBottomColor: colors.border,
+            },
+          ]}
         >
-          {/* Fixed Header - Outside KeyboardAvoidingView */}
-          <View style={styles.headerWrapper}>
-            <View style={styles.header}>
-              <View style={styles.headerContent}>
-                <View style={styles.headerLeft}>
-                  <View style={styles.headerTextContainer}>
-                    <Text style={[styles.headerTitle, { color: colors.text }]}>
-                      {t("ai_chat.title")}
-                    </Text>
-
-                    <Text
-                      style={[styles.headerSubtitle, { color: colors.text }]}
-                    >
-                      {t("ai_chat.subtitle")}
-                    </Text>
-                  </View>
-                </View>
-                <TouchableOpacity
-                  style={styles.clearButton}
-                  onPress={clearChat}
+          <View style={[s.hContent, isRTL && s.hContentRTL]}>
+            <View style={[s.hLeft, isRTL && s.hLeftRTL]}>
+              <View style={[s.iconWrap, { backgroundColor: colors.card }]}>
+                <Bot size={18} color={emeraldSpectrum.emerald500} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    s.hTitle,
+                    { color: colors.text, textAlign: isRTL ? "right" : "left" },
+                  ]}
                 >
-                  <Trash2 size={20} color={colors.destructive} />
-                </TouchableOpacity>
+                  {t("ai_chat.title")}
+                </Text>
+                <Text
+                  style={[
+                    s.hSub,
+                    {
+                      color: colors.textSecondary,
+                      textAlign: isRTL ? "right" : "left",
+                    },
+                  ]}
+                >
+                  {t("ai_chat.subtitle")}
+                </Text>
               </View>
             </View>
+            <TouchableOpacity
+              style={[s.clearBtn, { backgroundColor: colors.card }]}
+              onPress={clearChat}
+            >
+              <Trash2 size={16} color={colors.error} />
+            </TouchableOpacity>
           </View>
-          {/* Profile Card */}
           {(userProfile.allergies.length > 0 ||
             userProfile.medicalConditions.length > 0) && (
-            <View style={styles.profileCard}>
-              <View style={styles.profileHeader}>
-                <Shield size={18} color="#16A085" />
-                <Text style={styles.profileTitle}>
+            <View style={[s.profCard, { backgroundColor: colors.card }]}>
+              <View
+                style={[s.profHdr, isRTL && { flexDirection: "row-reverse" }]}
+              >
+                <Shield size={14} color={emeraldSpectrum.emerald500} />
+                <Text style={[s.profTitle, { color: colors.text }]}>
                   {t("ai_chat.safety_profile.title")}
                 </Text>
               </View>
-              <View style={styles.profileContent}>
+              <View style={{ gap: 8 }}>
                 {userProfile.allergies.length > 0 && (
-                  <View style={styles.profileSection}>
-                    <Text style={styles.profileLabel}>
+                  <View
+                    style={[
+                      s.profSec,
+                      isRTL && { flexDirection: "row-reverse" },
+                    ]}
+                  >
+                    <Text style={[s.profLbl, { color: colors.textSecondary }]}>
                       {t("ai_chat.safety_profile.allergies")}
                     </Text>
-                    <View style={styles.tagContainer}>
-                      {userProfile.allergies.map((allergy, index) => (
-                        <View key={index} style={styles.allergyTag}>
-                          <Text style={styles.allergyTagText}>{allergy}</Text>
+                    <View style={s.tags}>
+                      {userProfile.allergies.map((a, i) => (
+                        <View
+                          key={i}
+                          style={[s.allergyTag, { borderColor: colors.error }]}
+                        >
+                          <Text style={[s.allergyTxt, { color: colors.error }]}>
+                            {a}
+                          </Text>
                         </View>
                       ))}
                     </View>
                   </View>
                 )}
                 {userProfile.medicalConditions.length > 0 && (
-                  <View style={styles.profileSection}>
-                    <Text style={styles.profileLabel}>
+                  <View
+                    style={[
+                      s.profSec,
+                      isRTL && { flexDirection: "row-reverse" },
+                    ]}
+                  >
+                    <Text style={[s.profLbl, { color: colors.textSecondary }]}>
                       {t("ai_chat.safety_profile.medical")}
                     </Text>
-                    <View style={styles.tagContainer}>
-                      {userProfile.medicalConditions.map((condition, index) => (
-                        <View key={index} style={styles.medicalTag}>
-                          <Text style={styles.medicalTagText}>{condition}</Text>
+                    <View style={s.tags}>
+                      {userProfile.medicalConditions.map((c, i) => (
+                        <View
+                          key={i}
+                          style={[s.medTag, { borderColor: colors.warning }]}
+                        >
+                          <Text style={[s.medTxt, { color: colors.warning }]}>
+                            {c}
+                          </Text>
                         </View>
                       ))}
                     </View>
@@ -580,53 +532,80 @@ export default function AIChatScreen({
               </View>
             </View>
           )}
-
+        </View>
+        <ScrollView
+          ref={scrollViewRef}
+          style={[{ flex: 1, backgroundColor: colors.background }]}
+          contentContainerStyle={{
+            paddingHorizontal: 14,
+            paddingTop: 12,
+            paddingBottom: 16,
+          }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
           {messages.map(renderMessage)}
-
           {isTyping && (
-            <View style={styles.typingIndicator}>
-              <View style={styles.typingRow}>
-                <View style={styles.botIconContainer}>
-                  <Bot size={20} color="#16A085" />
+            <View style={{ marginBottom: 12 }}>
+              <View
+                style={[
+                  { flexDirection: "row", alignItems: "center", gap: 8 },
+                  isRTL && { flexDirection: "row-reverse" },
+                ]}
+              >
+                <View style={[s.botIcon, { backgroundColor: colors.card }]}>
+                  <Bot size={16} color={emeraldSpectrum.emerald500} />
                 </View>
-                <View style={styles.typingBubble}>
-                  <ActivityIndicator size="small" color="#16A085" />
-                  <Text style={styles.typingText}>{t("ai_chat.typing")}</Text>
+                <View
+                  style={[s.typeBubble, { backgroundColor: colors.surface }]}
+                >
+                  <ActivityIndicator
+                    size="small"
+                    color={emeraldSpectrum.emerald500}
+                  />
+                  <Text style={[s.typeText, { color: colors.textSecondary }]}>
+                    {t("ai_chat.typing")}
+                  </Text>
                 </View>
               </View>
             </View>
           )}
         </ScrollView>
-
-        {/* Input Area */}
-        <View style={styles.inputArea}>
-          <View style={styles.inputContainer}>
+        <View
+          style={[
+            s.inputArea,
+            {
+              backgroundColor: colors.background,
+            },
+          ]}
+        >
+          <View style={[s.inputCont, { backgroundColor: colors.card }]}>
             <TextInput
               style={[
-                styles.textInput,
-                { textAlign: language === "he" ? "right" : "left" },
+                s.input,
+                { color: colors.text, textAlign: isRTL ? "right" : "left" },
               ]}
               value={inputText}
               onChangeText={setInputText}
               placeholder={t("ai_chat.type_message")}
-              placeholderTextColor="#95A5A6"
+              placeholderTextColor={colors.muted}
               multiline
               maxLength={500}
             />
             <TouchableOpacity
-              style={styles.sendButton}
+              style={s.sendBtn}
               onPress={sendMessage}
               disabled={!inputText.trim() || isTyping}
             >
               <LinearGradient
                 colors={
                   !inputText.trim() || isTyping
-                    ? ["#BDC3C7", "#95A5A6"]
-                    : ["#16A085", "#1ABC9C"]
+                    ? [colors.disabled, colors.disabled]
+                    : [emeraldSpectrum.emerald500, emeraldSpectrum.emerald600]
                 }
-                style={styles.sendGradient}
+                style={s.sendGrad}
               >
-                <Send size={20} color="#FFFFFF" />
+                <Send size={18} color="#FFF" />
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -636,291 +615,141 @@ export default function AIChatScreen({
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F8F9FA",
-  },
-  headerWrapper: {
-    zIndex: 10,
-  },
+const s = StyleSheet.create({
+  container: { flex: 1 },
   header: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 16,
+    borderBottomWidth: 1,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 8,
   },
-  headerContent: {
+  hContent: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
-  headerLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    flex: 1,
-  },
-  headerTextContainer: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: "#FFFFFF",
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    color: "rgba(255, 255, 255, 0.9)",
-    fontWeight: "500",
-    marginTop: 2,
-  },
-  clearButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(255, 255, 255, 0.2)",
+  hContentRTL: { flexDirection: "row-reverse" },
+  hLeft: { flexDirection: "row", alignItems: "center", flex: 1, gap: 10 },
+  hLeftRTL: { flexDirection: "row-reverse" },
+  iconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     justifyContent: "center",
     alignItems: "center",
   },
-  keyboardAvoidingView: {
-    flex: 1,
+  hTitle: { fontSize: 16, fontWeight: "600" },
+  hSub: { fontSize: 11, marginTop: 1 },
+  clearBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  messagesContainer: {
-    flex: 1,
-  },
-  messagesContent: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 20,
-  },
-  profileCard: {
-    backgroundColor: "#FFFFFF",
-    marginBottom: 16,
-    borderRadius: 18,
-    padding: 18,
-  },
-  profileHeader: {
+  profCard: { marginTop: 10, borderRadius: 14, padding: 12 },
+  profHdr: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 8,
+    gap: 6,
   },
-  profileTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#1F2937",
-    marginLeft: 8,
-  },
-  profileContent: {
-    gap: 12,
-  },
-  profileSection: {
+  profTitle: { fontSize: 12, fontWeight: "600" },
+  profSec: {
     flexDirection: "row",
     alignItems: "center",
-    flexWrap: "wrap",
-  },
-  profileLabel: {
-    fontSize: 14,
-    fontWeight: "500",
-    color: "#7F8C8D",
-    marginRight: 12,
-    minWidth: 70,
-  },
-  tagContainer: {
-    flexDirection: "row",
     flexWrap: "wrap",
     gap: 6,
-    flex: 1,
   },
+  profLbl: { fontSize: 11 },
+  tags: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   allergyTag: {
-    backgroundColor: "#FDEBEA",
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+    backgroundColor: "rgba(239, 68, 68, 0.1)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#E74C3C",
   },
-  allergyTagText: {
-    fontSize: 12,
-    color: "#E74C3C",
-    fontWeight: "500",
-  },
-  medicalTag: {
-    backgroundColor: "#F4ECF7",
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
+  allergyTxt: { fontSize: 10, fontWeight: "500" },
+  medTag: {
+    backgroundColor: "rgba(245, 158, 11, 0.1)",
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#9B59B6",
   },
-  medicalTagText: {
-    fontSize: 12,
-    color: "#9B59B6",
-    fontWeight: "500",
-  },
-  messageContainer: {
-    marginBottom: 24,
-  },
-  messageRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 12,
-  },
-  userMessageRow: {
-    flexDirection: "row-reverse",
-  },
-  botIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#E8F8F5",
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 4,
-  },
-  userIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#16A085",
-    justifyContent: "center",
-    alignItems: "center",
-    marginTop: 4,
-  },
-  messageContentContainer: {
-    flex: 1,
-    maxWidth: width - 120,
-  },
-  messageBubble: {
-    paddingHorizontal: 18,
-    paddingVertical: 14,
-    borderRadius: 20,
-    backgroundColor: "#FFFFFF",
-  },
-  userBubble: {
-    backgroundColor: "#16A085",
-    alignSelf: "flex-end",
-    shadowColor: "#16A085",
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-  },
-  botBubble: {
-    backgroundColor: "#FFFFFF",
-    alignSelf: "flex-start",
-  },
-  warningBubble: {
-    borderLeftWidth: 4,
-    borderLeftColor: "#E74C3C",
-    backgroundColor: "#FDEBEA",
-  },
-  warningBanner: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E74C3C",
-  },
-  warningText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#E74C3C",
-    marginLeft: 6,
-  },
-  messageText: {
-    fontSize: 16,
-    lineHeight: 24,
-    color: "#2C3E50",
-  },
-  userText: {
-    color: "#FFFFFF",
-  },
-  timestamp: {
-    fontSize: 11,
-    color: "#95A5A6",
-    marginTop: 6,
-  },
-  userTimestamp: {
-    color: "rgba(255,255,255,0.8)",
-    textAlign: "right",
-  },
-  suggestionsContainer: {
-    marginTop: 16,
-  },
-  suggestionsLabel: {
-    fontSize: 12,
-    fontWeight: "500",
-    color: "#7F8C8D",
-    marginBottom: 8,
-  },
-  suggestionsGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-  },
-  suggestionButton: {
-    backgroundColor: "#E8F8F5",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: "#16A085",
-  },
-  suggestionButtonText: {
-    fontSize: 12,
-    fontWeight: "500",
-    color: "#16A085",
-  },
-  typingIndicator: {
-    marginBottom: 24,
-  },
-  typingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-  },
-  typingBubble: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+  medTxt: { fontSize: 10, fontWeight: "500" },
+  msgContainer: { marginBottom: 12 },
+  msgRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  userLTR: { flexDirection: "row-reverse" },
+  userRTL: { flexDirection: "row" },
+  botRTL: { flexDirection: "row-reverse" },
+  botIcon: {
+    width: 32,
+    height: 32,
     borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  typingText: {
-    fontSize: 14,
-    color: "#7F8C8D",
-    marginLeft: 8,
-  },
-  inputArea: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-  },
-  inputContainer: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 12,
-    backgroundColor: "#ffffffff",
-    borderRadius: 24,
-    paddingHorizontal: 6,
-    paddingVertical: 6,
-  },
-  textInput: {
-    flex: 1,
-    fontSize: 16,
-    color: "#2C3E50",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    maxHeight: 120,
-  },
-  sendButton: {
-    borderRadius: 20,
+  userIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: "center",
+    alignItems: "center",
     overflow: "hidden",
   },
-  sendGradient: {
-    width: 40,
-    height: 40,
+  profImg: { width: 32, height: 32, borderRadius: 16 },
+  msgContent: { flex: 1, maxWidth: width - 80 },
+  bubble: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 16 },
+  warnBubble: { borderLeftWidth: 2, backgroundColor: "rgba(239, 68, 68, 0.1)" },
+  warnBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(239, 68, 68, 0.3)",
+    gap: 4,
+  },
+  warnText: { fontSize: 10, fontWeight: "600" },
+  msgText: { fontSize: 14, lineHeight: 20 },
+  time: { fontSize: 9, marginTop: 4 },
+  suggests: { marginTop: 10 },
+  sugLabel: { fontSize: 11, fontWeight: "500", marginBottom: 6 },
+  sugGrid: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+  sugBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  sugBtnText: { fontSize: 11 },
+  typeBubble: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  typeText: { fontSize: 13 },
+  inputArea: { paddingHorizontal: 14, paddingVertical: 10 },
+  inputCont: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 8,
+    borderRadius: 24,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+  },
+  input: { flex: 1, fontSize: 14, paddingVertical: 8, maxHeight: 100 },
+  sendBtn: { width: 36, height: 36, borderRadius: 18, overflow: "hidden" },
+  sendGrad: {
+    width: 36,
+    height: 36,
     justifyContent: "center",
     alignItems: "center",
+    borderRadius: 18,
   },
 });

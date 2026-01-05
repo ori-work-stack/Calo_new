@@ -4,6 +4,7 @@ import { Platform } from "react-native";
 
 const MAX_SECURE_STORE_SIZE = 2048; // bytes
 const COMPRESSION_THRESHOLD = 1024; // Compress items larger than 1KB
+const MAX_ALLOWED_SIZE = 500 * 1024; // 500KB - NEVER store anything larger than this!
 
 // Simple compression function
 const compressString = (str: string): string => {
@@ -20,6 +21,23 @@ const compressString = (str: string): string => {
     return str.trim();
   }
 };
+
+// Check if value contains base64 image data
+const containsBase64Image = (value: string): boolean => {
+  // Check for common base64 image patterns
+  if (value.startsWith("data:image/")) return true;
+  if (value.includes(";base64,")) return true;
+
+  // Check for very long strings that look like base64
+  if (
+    value.length > 50000 &&
+    /^[A-Za-z0-9+/=]+$/.test(value.substring(0, 1000))
+  ) {
+    return true;
+  }
+
+  return false;
+};
 // Update setSecureItem to handle SecureStore size limits and fallbacks
 export const setSecureItem = async (
   key: string,
@@ -27,8 +45,25 @@ export const setSecureItem = async (
 ): Promise<void> => {
   let processedValue = value;
   try {
-    // Check initial size and compress if needed
+    // Check initial size
     const initialSize = Buffer.byteLength(value, "utf8");
+
+    // CRITICAL: Reject base64 images immediately
+    if (containsBase64Image(value)) {
+      throw new Error(
+        `Cannot store base64 images in AsyncStorage/SecureStore. Key: ${key}`
+      );
+    }
+
+    // CRITICAL: Reject any value over MAX_ALLOWED_SIZE
+    if (initialSize > MAX_ALLOWED_SIZE) {
+      throw new Error(
+        `Value too large for storage (${(initialSize / 1024).toFixed(
+          1
+        )}KB). Key: ${key}. Use file system or database instead.`
+      );
+    }
+
     console.log(`📏 Initial size for ${key}: ${initialSize} bytes`);
 
     if (value.length > COMPRESSION_THRESHOLD) {
@@ -56,35 +91,19 @@ export const setSecureItem = async (
         // Ignore if key doesn't exist
       }
 
-      // For very large items, split them across multiple AsyncStorage keys
-      if (valueSize > 50000) {
-        // 50KB
-        await splitLargeValue(key, processedValue);
-      } else {
-        await AsyncStorage.setItem(key, processedValue);
-      }
+      await AsyncStorage.setItem(key, processedValue);
       return;
     }
 
     await SecureStore.setItemAsync(key, processedValue);
     // Clean up any previous async storage entry if SecureStore is used
     await AsyncStorage.removeItem(key).catch(() => {});
-
-    // Also clean up any split chunks if they exist
-    await cleanupSplitChunks(key).catch(() => {});
   } catch (error) {
     console.error(`Failed to set secure item ${key}:`, error);
     // Fallback to AsyncStorage if SecureStore fails
     try {
       console.log(`🔒 Fallback storage for key "${key}" using AsyncStorage`);
-
-      // Check if we need to split the value for AsyncStorage too
-      if (processedValue.length > 100000) {
-        // 100KB
-        await splitLargeValue(key, processedValue);
-      } else {
-        await AsyncStorage.setItem(key, processedValue);
-      }
+      await AsyncStorage.setItem(key, processedValue);
     } catch (fallbackError) {
       console.error(`Fallback storage also failed for ${key}:`, fallbackError);
       throw fallbackError;
@@ -100,19 +119,12 @@ export const getSecureItem = async (key: string): Promise<string | null> => {
 
     // Try AsyncStorage as fallback
     const asyncValue = await AsyncStorage.getItem(key);
-    if (asyncValue !== null) return asyncValue;
-
-    // Try to reconstruct from split chunks
-    return await reconstructSplitValue(key);
+    return asyncValue;
   } catch (error) {
     console.error(`Failed to get secure item ${key}:`, error);
     // Try AsyncStorage as fallback
     try {
-      const asyncValue = await AsyncStorage.getItem(key);
-      if (asyncValue !== null) return asyncValue;
-
-      // Try to reconstruct from split chunks
-      return await reconstructSplitValue(key);
+      return await AsyncStorage.getItem(key);
     } catch (fallbackError) {
       console.error(`Fallback storage also failed for ${key}:`, fallbackError);
       return null;
@@ -125,72 +137,7 @@ export const removeSecureItem = async (key: string): Promise<void> => {
   try {
     await SecureStore.deleteItemAsync(key).catch(() => {});
     await AsyncStorage.removeItem(key).catch(() => {});
-    await cleanupSplitChunks(key).catch(() => {});
   } catch (error) {
     console.error(`Error removing data for key "${key}":`, error);
-  }
-};
-
-// Helper functions for handling large values
-const splitLargeValue = async (key: string, value: string): Promise<void> => {
-  const chunkSize = 50000; // 50KB chunks
-  const chunks = [];
-
-  for (let i = 0; i < value.length; i += chunkSize) {
-    chunks.push(value.substring(i, i + chunkSize));
-  }
-
-  // Store chunk count
-  await AsyncStorage.setItem(`${key}_chunk_count`, chunks.length.toString());
-
-  // Store each chunk
-  for (let i = 0; i < chunks.length; i++) {
-    await AsyncStorage.setItem(`${key}_chunk_${i}`, chunks[i]);
-  }
-
-  console.log(`📦 Split ${key} into ${chunks.length} chunks`);
-};
-
-const reconstructSplitValue = async (key: string): Promise<string | null> => {
-  try {
-    const chunkCountStr = await AsyncStorage.getItem(`${key}_chunk_count`);
-    if (!chunkCountStr) return null;
-
-    const chunkCount = parseInt(chunkCountStr, 10);
-    if (isNaN(chunkCount) || chunkCount <= 0) return null;
-
-    const chunks: string[] = [];
-    for (let i = 0; i < chunkCount; i++) {
-      const chunk = await AsyncStorage.getItem(`${key}_chunk_${i}`);
-      if (chunk === null) {
-        console.warn(`Missing chunk ${i} for key ${key}`);
-        return null;
-      }
-      chunks.push(chunk);
-    }
-
-    return chunks.join("");
-  } catch (error) {
-    console.error(`Failed to reconstruct split value for ${key}:`, error);
-    return null;
-  }
-};
-
-const cleanupSplitChunks = async (key: string): Promise<void> => {
-  try {
-    const chunkCountStr = await AsyncStorage.getItem(`${key}_chunk_count`);
-    if (!chunkCountStr) return;
-
-    const chunkCount = parseInt(chunkCountStr, 10);
-    if (isNaN(chunkCount)) return;
-
-    const keysToRemove = [`${key}_chunk_count`];
-    for (let i = 0; i < chunkCount; i++) {
-      keysToRemove.push(`${key}_chunk_${i}`);
-    }
-
-    await AsyncStorage.multiRemove(keysToRemove);
-  } catch (error) {
-    console.error(`Failed to cleanup split chunks for ${key}:`, error);
   }
 };
