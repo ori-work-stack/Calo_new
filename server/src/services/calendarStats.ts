@@ -22,15 +22,28 @@ export class calendarStatsService {
         month
       );
 
-      const startDate = new Date(year, month - 1, 1);
-      const endDate = new Date(year, month, 0, 23, 59, 59, 999);
+      // FIXED: Properly handle date boundaries for UTC
+      const startDate = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+      const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
 
       const prevMonth = month === 1 ? 12 : month - 1;
       const prevYear = month === 1 ? year - 1 : year;
-      const prevStartDate = new Date(prevYear, prevMonth - 1, 1);
-      const prevEndDate = new Date(prevYear, prevMonth, 0, 23, 59, 59, 999);
+      const prevStartDate = new Date(
+        Date.UTC(prevYear, prevMonth - 1, 1, 0, 0, 0, 0)
+      );
+      const prevEndDate = new Date(
+        Date.UTC(prevYear, prevMonth, 0, 23, 59, 59, 999)
+      );
 
-      // Fetch all data in parallel
+      console.log("📅 Date ranges:", {
+        current: { start: startDate.toISOString(), end: endDate.toISOString() },
+        previous: {
+          start: prevStartDate.toISOString(),
+          end: prevEndDate.toISOString(),
+        },
+      });
+
+      // Fetch all data in parallel with better error handling
       const [
         currentMeals,
         prevMeals,
@@ -42,106 +55,160 @@ export class calendarStatsService {
         userBadges,
         userProfile,
       ] = await Promise.all([
-        prisma.meal.findMany({
-          where: {
-            user_id,
-            upload_time: { gte: startDate, lte: endDate },
-          },
-          select: {
-            upload_time: true,
-            meal_period: true,
-            calories: true,
-            protein_g: true,
-            carbs_g: true,
-            fats_g: true,
-          },
-          orderBy: { upload_time: "asc" },
-        }),
-        prisma.meal.findMany({
-          where: {
-            user_id,
-            upload_time: { gte: prevStartDate, lte: prevEndDate },
-          },
-          select: {
-            calories: true,
-            protein_g: true,
-            carbs_g: true,
-            fats_g: true,
-          },
-        }),
-        prisma.dailyGoal.findMany({
-          where: {
-            user_id,
-            date: { gte: startDate, lte: endDate },
-          },
-          select: {
-            date: true,
-            calories: true,
-            protein_g: true,
-            carbs_g: true,
-            fats_g: true,
-          },
-        }),
-        prisma.dailyGoal.findMany({
-          where: {
-            user_id,
-            date: { gte: prevStartDate, lte: prevEndDate },
-          },
-          select: {
-            calories: true,
-            protein_g: true,
-            carbs_g: true,
-            fats_g: true,
-          },
-        }),
-        prisma.waterIntake.findMany({
-          where: {
-            user_id,
-            date: { gte: startDate, lte: endDate },
-          },
-          select: {
-            date: true,
-            milliliters_consumed: true,
-          },
-        }),
-        prisma.waterIntake.findMany({
-          where: {
-            user_id,
-            date: { gte: prevStartDate, lte: prevEndDate },
-          },
-          select: {
-            milliliters_consumed: true,
-          },
-        }),
-        prisma.calendarEvent.findMany({
-          where: {
-            user_id,
-            date: { gte: startDate, lte: endDate },
-          },
-          select: {
-            event_id: true,
-            date: true,
-            title: true,
-            type: true,
-            description: true,
-            created_at: true,
-          },
-        }),
-        prisma.gamificationBadge.findMany({
-          where: {
-            user_id,
-            achieved_at: {
-              gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+        prisma.meal
+          .findMany({
+            where: {
+              user_id,
+              upload_time: { gte: startDate, lte: endDate },
             },
-          },
-          orderBy: { achieved_at: "desc" },
-          take: 10,
-        }),
-        prisma.user.findUnique({
-          where: { user_id },
-          select: { total_points: true },
-        }),
+            select: {
+              upload_time: true,
+              meal_period: true,
+              calories: true,
+              protein_g: true,
+              carbs_g: true,
+              fats_g: true,
+            },
+            orderBy: { upload_time: "asc" },
+          })
+          .catch((err) => {
+            console.error("❌ Error fetching current meals:", err);
+            return [];
+          }),
+        prisma.meal
+          .findMany({
+            where: {
+              user_id,
+              upload_time: { gte: prevStartDate, lte: prevEndDate },
+            },
+            select: {
+              upload_time: true,
+              calories: true,
+              protein_g: true,
+              carbs_g: true,
+              fats_g: true,
+            },
+          })
+          .catch((err) => {
+            console.error("❌ Error fetching previous meals:", err);
+            return [];
+          }),
+        prisma.dailyGoal
+          .findMany({
+            where: {
+              user_id,
+              date: { gte: startDate, lte: endDate },
+            },
+            select: {
+              date: true,
+              calories: true,
+              protein_g: true,
+              carbs_g: true,
+              fats_g: true,
+            },
+          })
+          .catch((err) => {
+            console.error("❌ Error fetching current goals:", err);
+            return [];
+          }),
+        prisma.dailyGoal
+          .findMany({
+            where: {
+              user_id,
+              date: { gte: prevStartDate, lte: prevEndDate },
+            },
+            select: {
+              date: true,
+              calories: true,
+              protein_g: true,
+              carbs_g: true,
+              fats_g: true,
+            },
+          })
+          .catch((err) => {
+            console.error("❌ Error fetching previous goals:", err);
+            return [];
+          }),
+        prisma.waterIntake
+          .findMany({
+            where: {
+              user_id,
+              date: { gte: startDate, lte: endDate },
+            },
+            select: {
+              date: true,
+              milliliters_consumed: true,
+            },
+          })
+          .catch((err) => {
+            console.error("❌ Error fetching current water:", err);
+            return [];
+          }),
+        prisma.waterIntake
+          .findMany({
+            where: {
+              user_id,
+              date: { gte: prevStartDate, lte: prevEndDate },
+            },
+            select: {
+              date: true,
+              milliliters_consumed: true,
+            },
+          })
+          .catch((err) => {
+            console.error("❌ Error fetching previous water:", err);
+            return [];
+          }),
+        prisma.calendarEvent
+          .findMany({
+            where: {
+              user_id,
+              date: { gte: startDate, lte: endDate },
+            },
+            select: {
+              event_id: true,
+              date: true,
+              title: true,
+              type: true,
+              description: true,
+              created_at: true,
+            },
+          })
+          .catch((err) => {
+            console.error("❌ Error fetching events:", err);
+            return [];
+          }),
+        prisma.gamificationBadge
+          .findMany({
+            where: {
+              user_id,
+              achieved_at: {
+                gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+              },
+            },
+            orderBy: { achieved_at: "desc" },
+            take: 10,
+          })
+          .catch((err) => {
+            console.error("❌ Error fetching badges:", err);
+            return [];
+          }),
+        prisma.user
+          .findUnique({
+            where: { user_id },
+            select: { total_points: true },
+          })
+          .catch((err) => {
+            console.error("❌ Error fetching user profile:", err);
+            return null;
+          }),
       ]);
+
+      console.log("📊 Data fetched:", {
+        currentMeals: currentMeals.length,
+        prevMeals: prevMeals.length,
+        currentEvents: currentEvents.length,
+      });
 
       // Get default goals
       const defaultGoals = {
@@ -240,39 +307,90 @@ export class calendarStatsService {
     const waterByDate: Record<string, any> = {};
     const eventsByDate: Record<string, any[]> = {};
 
+    // FIXED: Better date validation and error handling
+    const safeParseDate = (
+      dateValue: any,
+      fieldName: string
+    ): string | null => {
+      try {
+        if (!dateValue) {
+          console.warn(`⚠️ Missing ${fieldName}:`, dateValue);
+          return null;
+        }
+        const date = new Date(dateValue);
+        if (isNaN(date.getTime())) {
+          console.error(`❌ Invalid ${fieldName}:`, dateValue);
+          return null;
+        }
+        return date.toISOString().split("T")[0];
+      } catch (err) {
+        console.error(`❌ Error parsing ${fieldName}:`, dateValue, err);
+        return null;
+      }
+    };
+
+    // Process meals with better error handling
     meals.forEach((meal) => {
-      const dateStr = new Date(meal.upload_time).toISOString().split("T")[0];
+      const dateStr = safeParseDate(meal.upload_time, "meal upload_time");
+      if (!dateStr) return;
+
       if (!mealsByDate[dateStr]) mealsByDate[dateStr] = [];
       mealsByDate[dateStr].push(meal);
     });
 
+    // Process daily goals
     dailyGoals.forEach((goal) => {
-      const dateStr = new Date(goal.date).toISOString().split("T")[0];
+      const dateStr = safeParseDate(goal.date, "goal date");
+      if (!dateStr) return;
+
       goalsByDate[dateStr] = goal;
     });
 
+    // Process water intakes
     waterIntakes.forEach((water) => {
-      const dateStr = new Date(water.date).toISOString().split("T")[0];
+      const dateStr = safeParseDate(water.date, "water date");
+      if (!dateStr) return;
+
       waterByDate[dateStr] = water;
     });
 
+    // Process events
     events.forEach((event) => {
-      const dateStr = new Date(event.date).toISOString().split("T")[0];
+      const dateStr = safeParseDate(event.date, "event date");
+      if (!dateStr) return;
+
       if (!eventsByDate[dateStr]) eventsByDate[dateStr] = [];
+
+      const createdAt = new Date(event.created_at);
       eventsByDate[dateStr].push({
         id: event.event_id,
         title: event.title,
         type: event.type,
-        created_at: event.created_at.toISOString(),
+        created_at: isNaN(createdAt.getTime())
+          ? new Date().toISOString()
+          : createdAt.toISOString(),
         description: event.description || undefined,
       });
     });
 
     const dailyData: DayData[] = [];
-    const daysInMonth = endDate.getDate();
+
+    // FIXED: Use UTC dates consistently
+    const year = startDate.getUTCFullYear();
+    const month = startDate.getUTCMonth();
+    const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+
+    console.log(`📅 Processing ${daysInMonth} days for ${year}-${month + 1}`);
 
     for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(startDate.getFullYear(), startDate.getMonth(), day);
+      const date = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+
+      // Validate the created date
+      if (isNaN(date.getTime())) {
+        console.error("❌ Invalid date created:", year, month, day);
+        continue;
+      }
+
       const dateStr = date.toISOString().split("T")[0];
       const dayMeals = mealsByDate[dateStr] || [];
       const dayGoal = goalsByDate[dateStr];
@@ -281,10 +399,10 @@ export class calendarStatsService {
 
       const goals = dayGoal
         ? {
-            calories: Number(dayGoal.calories),
-            protein: Number(dayGoal.protein_g),
-            carbs: Number(dayGoal.carbs_g),
-            fat: Number(dayGoal.fats_g),
+            calories: Number(dayGoal.calories) || defaultGoals.calories,
+            protein: Number(dayGoal.protein_g) || defaultGoals.protein,
+            carbs: Number(dayGoal.carbs_g) || defaultGoals.carbs,
+            fat: Number(dayGoal.fats_g) || defaultGoals.fat,
           }
         : defaultGoals;
 
@@ -303,7 +421,9 @@ export class calendarStatsService {
         mainMealPeriods.includes(meal.meal_period?.toLowerCase() || "")
       ).length;
 
-      const waterIntake = dayWater ? dayWater.milliliters_consumed : 0;
+      const waterIntake = dayWater
+        ? Number(dayWater.milliliters_consumed) || 0
+        : 0;
       const quality_score = this.calculateQualityScore(
         totals,
         goals,
@@ -327,6 +447,7 @@ export class calendarStatsService {
       });
     }
 
+    console.log(`✅ Processed ${dailyData.length} days of data`);
     return dailyData;
   }
 
@@ -346,40 +467,47 @@ export class calendarStatsService {
 
     const streakDays = this.calculateStreakDays(dailyData);
 
-    const averageCalories = daysWithData.length > 0
-      ? daysWithData.reduce((sum, day) => sum + day.calories_actual, 0) /
-        daysWithData.length
-      : 0;
+    const averageCalories =
+      daysWithData.length > 0
+        ? daysWithData.reduce((sum, day) => sum + day.calories_actual, 0) /
+          daysWithData.length
+        : 0;
 
-    const averageProtein = daysWithData.length > 0
-      ? daysWithData.reduce((sum, day) => sum + day.protein_actual, 0) /
-        daysWithData.length
-      : 0;
+    const averageProtein =
+      daysWithData.length > 0
+        ? daysWithData.reduce((sum, day) => sum + day.protein_actual, 0) /
+          daysWithData.length
+        : 0;
 
-    const averageCarbs = daysWithData.length > 0
-      ? daysWithData.reduce((sum, day) => sum + day.carbs_actual, 0) /
-        daysWithData.length
-      : 0;
+    const averageCarbs =
+      daysWithData.length > 0
+        ? daysWithData.reduce((sum, day) => sum + day.carbs_actual, 0) /
+          daysWithData.length
+        : 0;
 
-    const averageFat = daysWithData.length > 0
-      ? daysWithData.reduce((sum, day) => sum + day.fat_actual, 0) /
-        daysWithData.length
-      : 0;
+    const averageFat =
+      daysWithData.length > 0
+        ? daysWithData.reduce((sum, day) => sum + day.fat_actual, 0) /
+          daysWithData.length
+        : 0;
 
-    const averageWater = daysWithData.length > 0
-      ? daysWithData.reduce((sum, day) => sum + day.water_intake_ml, 0) /
-        daysWithData.length
-      : 0;
+    const averageWater =
+      daysWithData.length > 0
+        ? daysWithData.reduce((sum, day) => sum + day.water_intake_ml, 0) /
+          daysWithData.length
+        : 0;
 
-    const averageQualityScore = daysWithData.length > 0
-      ? daysWithData.reduce((sum, day) => sum + day.quality_score, 0) /
-        daysWithData.length
-      : 0;
+    const averageQualityScore =
+      daysWithData.length > 0
+        ? daysWithData.reduce((sum, day) => sum + day.quality_score, 0) /
+          daysWithData.length
+        : 0;
 
-    const averageMealCount = daysWithData.length > 0
-      ? daysWithData.reduce((sum, day) => sum + day.meal_count, 0) /
-        daysWithData.length
-      : 0;
+    const averageMealCount =
+      daysWithData.length > 0
+        ? daysWithData.reduce((sum, day) => sum + day.meal_count, 0) /
+          daysWithData.length
+        : 0;
 
     return {
       monthlyProgress: Math.round(monthlyProgress),
@@ -409,13 +537,16 @@ export class calendarStatsService {
       const values = daysWithData.map((day) => day[actualKey] as number);
       const goals = daysWithData.map((day) => day[goalKey] as number);
 
-      const average = values.reduce((sum, val) => sum + val, 0) / (values.length || 1);
+      const average =
+        values.reduce((sum, val) => sum + val, 0) / (values.length || 1);
       const min = Math.min(...values, 0);
       const max = Math.max(...values, 0);
       const total = values.reduce((sum, val) => sum + val, 0);
-      const goalAverage = goals.reduce((sum, val) => sum + val, 0) / (goals.length || 1);
+      const goalAverage =
+        goals.reduce((sum, val) => sum + val, 0) / (goals.length || 1);
 
-      const adherencePercent = goalAverage > 0 ? (average / goalAverage) * 100 : 0;
+      const adherencePercent =
+        goalAverage > 0 ? (average / goalAverage) * 100 : 0;
 
       return {
         average: Math.round(average),
@@ -428,7 +559,9 @@ export class calendarStatsService {
     };
 
     const waterValues = daysWithData.map((day) => day.water_intake_ml);
-    const waterAverage = waterValues.reduce((sum, val) => sum + val, 0) / (waterValues.length || 1);
+    const waterAverage =
+      waterValues.reduce((sum, val) => sum + val, 0) /
+      (waterValues.length || 1);
 
     return {
       calories: calculateMacro("calories_actual", "calories_goal"),
@@ -531,15 +664,18 @@ export class calendarStatsService {
         (day) => day.calories_actual >= day.calories_goal * 0.9
       ).length;
 
-      const perfectDays = weekDays.filter((day) => day.quality_score >= 9).length;
+      const perfectDays = weekDays.filter(
+        (day) => day.quality_score >= 9
+      ).length;
 
       const averageProgress =
-        (weekDays.reduce((sum, day) => {
-          const progress = day.calories_goal > 0
-            ? (day.calories_actual / day.calories_goal) * 100
-            : 0;
+        weekDays.reduce((sum, day) => {
+          const progress =
+            day.calories_goal > 0
+              ? (day.calories_actual / day.calories_goal) * 100
+              : 0;
           return sum + Math.min(progress, 100);
-        }, 0) / weekDays.length);
+        }, 0) / weekDays.length;
 
       const averageCalories = Math.round(
         daysWithData.reduce((sum, day) => sum + day.calories_actual, 0) /
@@ -570,16 +706,19 @@ export class calendarStatsService {
       const challenges: string[] = [];
 
       if (goalDays >= 6) highlights.push("Almost perfect week!");
-      if (goalDays >= 4) highlights.push(`${goalDays} days of goal achievement`);
+      if (goalDays >= 4)
+        highlights.push(`${goalDays} days of goal achievement`);
       if (perfectDays >= 3) highlights.push(`${perfectDays} perfect days`);
 
       const lowDays = weekDays.filter(
-        (day) => day.calories_actual / day.calories_goal < 0.7
+        (day) =>
+          day.calories_goal > 0 && day.calories_actual / day.calories_goal < 0.7
       ).length;
       if (lowDays >= 2) challenges.push(`${lowDays} days below 70% of goal`);
 
       const overDays = weekDays.filter(
-        (day) => day.calories_actual / day.calories_goal > 1.1
+        (day) =>
+          day.calories_goal > 0 && day.calories_actual / day.calories_goal > 1.1
       ).length;
       if (overDays >= 2) challenges.push(`${overDays} days of overeating`);
 
@@ -647,27 +786,66 @@ export class calendarStatsService {
     const goalsByDate: Record<string, any> = {};
     const waterByDate: Record<string, any> = {};
 
+    // Helper function for safe date parsing
+    const safeParseDate = (
+      dateValue: any,
+      fieldName: string
+    ): string | null => {
+      try {
+        if (!dateValue) return null;
+        const date = new Date(dateValue);
+        if (isNaN(date.getTime())) {
+          console.error(`❌ Invalid ${fieldName}:`, dateValue);
+          return null;
+        }
+        return date.toISOString().split("T")[0];
+      } catch (err) {
+        console.error(`❌ Error parsing ${fieldName}:`, dateValue, err);
+        return null;
+      }
+    };
+
+    // Process meals
     meals.forEach((meal) => {
-      const dateStr = new Date(meal.upload_time).toISOString().split("T")[0];
+      const dateStr = safeParseDate(meal.upload_time, "meal upload_time");
+      if (!dateStr) return;
+
       if (!mealsByDate[dateStr]) mealsByDate[dateStr] = [];
       mealsByDate[dateStr].push(meal);
     });
 
+    // Process daily goals
     dailyGoals.forEach((goal) => {
-      const dateStr = new Date(goal.date).toISOString().split("T")[0];
+      const dateStr = safeParseDate(goal.date, "goal date");
+      if (!dateStr) return;
+
       goalsByDate[dateStr] = goal;
     });
 
+    // Process water intakes
     waterIntakes.forEach((water) => {
-      const dateStr = new Date(water.date).toISOString().split("T")[0];
+      const dateStr = safeParseDate(water.date, "water date");
+      if (!dateStr) return;
+
       waterByDate[dateStr] = water;
     });
 
     const dailyData: DayData[] = [];
-    const daysInMonth = endDate.getDate();
+
+    // Use UTC dates consistently
+    const year = startDate.getUTCFullYear();
+    const month = startDate.getUTCMonth();
+    const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
 
     for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(startDate.getFullYear(), startDate.getMonth(), day);
+      const date = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+
+      // Validate the created date
+      if (isNaN(date.getTime())) {
+        console.error("❌ Invalid date created:", year, month, day);
+        continue;
+      }
+
       const dateStr = date.toISOString().split("T")[0];
       const dayMeals = mealsByDate[dateStr] || [];
       const dayGoal = goalsByDate[dateStr];
@@ -675,10 +853,10 @@ export class calendarStatsService {
 
       const goals = dayGoal
         ? {
-            calories: Number(dayGoal.calories),
-            protein: Number(dayGoal.protein_g),
-            carbs: Number(dayGoal.carbs_g),
-            fat: Number(dayGoal.fats_g),
+            calories: Number(dayGoal.calories) || defaultGoals.calories,
+            protein: Number(dayGoal.protein_g) || defaultGoals.protein,
+            carbs: Number(dayGoal.carbs_g) || defaultGoals.carbs,
+            fat: Number(dayGoal.fats_g) || defaultGoals.fat,
           }
         : defaultGoals;
 
@@ -692,7 +870,9 @@ export class calendarStatsService {
         { calories: 0, protein: 0, carbs: 0, fat: 0 }
       );
 
-      const waterIntake = dayWater ? dayWater.milliliters_consumed : 0;
+      const waterIntake = dayWater
+        ? Number(dayWater.milliliters_consumed) || 0
+        : 0;
 
       dailyData.push({
         date: dateStr,
@@ -724,36 +904,41 @@ export class calendarStatsService {
     return {
       monthlyProgress,
       streakDays,
-      averageCalories: daysWithData.length > 0
-        ? Math.round(
-            daysWithData.reduce((sum, day) => sum + day.calories_actual, 0) /
-              daysWithData.length
-          )
-        : 0,
-      averageProtein: daysWithData.length > 0
-        ? Math.round(
-            daysWithData.reduce((sum, day) => sum + day.protein_actual, 0) /
-              daysWithData.length
-          )
-        : 0,
-      averageCarbs: daysWithData.length > 0
-        ? Math.round(
-            daysWithData.reduce((sum, day) => sum + day.carbs_actual, 0) /
-              daysWithData.length
-          )
-        : 0,
-      averageFat: daysWithData.length > 0
-        ? Math.round(
-            daysWithData.reduce((sum, day) => sum + day.fat_actual, 0) /
-              daysWithData.length
-          )
-        : 0,
-      averageWater: daysWithData.length > 0
-        ? Math.round(
-            daysWithData.reduce((sum, day) => sum + day.water_intake_ml, 0) /
-              daysWithData.length
-          )
-        : 0,
+      averageCalories:
+        daysWithData.length > 0
+          ? Math.round(
+              daysWithData.reduce((sum, day) => sum + day.calories_actual, 0) /
+                daysWithData.length
+            )
+          : 0,
+      averageProtein:
+        daysWithData.length > 0
+          ? Math.round(
+              daysWithData.reduce((sum, day) => sum + day.protein_actual, 0) /
+                daysWithData.length
+            )
+          : 0,
+      averageCarbs:
+        daysWithData.length > 0
+          ? Math.round(
+              daysWithData.reduce((sum, day) => sum + day.carbs_actual, 0) /
+                daysWithData.length
+            )
+          : 0,
+      averageFat:
+        daysWithData.length > 0
+          ? Math.round(
+              daysWithData.reduce((sum, day) => sum + day.fat_actual, 0) /
+                daysWithData.length
+            )
+          : 0,
+      averageWater:
+        daysWithData.length > 0
+          ? Math.round(
+              daysWithData.reduce((sum, day) => sum + day.water_intake_ml, 0) /
+                daysWithData.length
+            )
+          : 0,
     };
   }
 
@@ -765,13 +950,18 @@ export class calendarStatsService {
     const sortedDays = days
       .filter((day) => {
         const dayDate = new Date(day.date);
+        if (isNaN(dayDate.getTime())) {
+          console.error("❌ Invalid date in streak calculation:", day.date);
+          return false;
+        }
         dayDate.setHours(0, 0, 0, 0);
         return dayDate <= today;
       })
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     for (const day of sortedDays) {
-      const progress = day.calories_actual / day.calories_goal;
+      const progress =
+        day.calories_goal > 0 ? day.calories_actual / day.calories_goal : 0;
       if (progress >= 0.9 && day.calories_actual > 0) {
         streak++;
       } else {
@@ -789,8 +979,10 @@ export class calendarStatsService {
   ): number {
     if (totals.calories === 0) return 0;
 
-    const caloriesScore = Math.min(totals.calories / goals.calories, 1.5);
-    const proteinScore = Math.min(totals.protein / goals.protein, 1.2);
+    const caloriesScore =
+      goals.calories > 0 ? Math.min(totals.calories / goals.calories, 1.5) : 0;
+    const proteinScore =
+      goals.protein > 0 ? Math.min(totals.protein / goals.protein, 1.2) : 0;
     const waterScore = Math.min(waterIntake / 2000, 1.0);
 
     const caloriesPenalty = Math.abs(1 - caloriesScore) * 2;

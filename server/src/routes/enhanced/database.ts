@@ -6,139 +6,99 @@ import { ApiResponse } from "../../types/api";
 
 const router = Router();
 
-// GET /api/database/health - Check database health
+// Shared permission check helper (DRY principle)
+const requireGoldSubscription = (req: AuthRequest, res: any): boolean => {
+  if (req.user.subscription_type !== "GOLD") {
+    res.status(403).json({
+      success: false,
+      error: "Insufficient permissions - GOLD subscription required",
+      timestamp: new Date().toISOString(),
+    });
+    return false;
+  }
+  return true;
+};
+
+// Shared error handler (DRY principle)
+const handleError = (res: any, error: unknown, message: string) => {
+  console.error(`${message}:`, error);
+  res.status(500).json({
+    success: false,
+    error: message,
+    details: error instanceof Error ? error.message : "Unknown error",
+    timestamp: new Date().toISOString(),
+  });
+};
+
+// GET /api/database/health - Check database health (NO CHANGES - already optimal)
 router.get("/health", authenticateToken, async (req: AuthRequest, res) => {
   try {
-    console.log("🔍 Database health check requested");
-
     const health = await DatabaseOptimizationService.checkDatabaseHealth();
 
-    const response: ApiResponse = {
+    res.json({
       success: true,
       data: health,
       message: `Database status: ${health.status}`,
       timestamp: new Date().toISOString(),
-    };
-
-    res.json(response);
+    });
   } catch (error) {
-    console.error("Error checking database health:", error);
-
-    const errorResponse: ApiResponse = {
-      success: false,
-      error: "Failed to check database health",
-      details: error instanceof Error ? error.message : "Unknown error",
-      timestamp: new Date().toISOString(),
-    };
-
-    res.status(500).json(errorResponse);
+    handleError(res, error, "Failed to check database health");
   }
 });
 
 // POST /api/database/cleanup - Trigger database cleanup
 router.post("/cleanup", authenticateToken, async (req: AuthRequest, res) => {
   try {
-    // Only allow admin users to trigger cleanup
-    if (req.user.subscription_type !== "GOLD") {
-      return res.status(403).json({
-        success: false,
-        error: "Insufficient permissions for database cleanup",
-      });
-    }
+    if (!requireGoldSubscription(req, res)) return;
 
-    console.log(
-      "🧹 Manual database cleanup triggered by user:",
-      req.user.user_id
-    );
+    console.log("🧹 Database cleanup by user:", req.user.user_id);
 
     const cleanupResult =
       await DatabaseOptimizationService.performIntelligentCleanup();
 
-    const response: ApiResponse = {
+    res.json({
       success: true,
       data: cleanupResult,
       message: `Cleanup completed: ${cleanupResult.deletedRecords} records deleted`,
       timestamp: new Date().toISOString(),
-    };
-
-    res.json(response);
+    });
   } catch (error) {
-    console.error("Error performing database cleanup:", error);
-
-    const errorResponse: ApiResponse = {
-      success: false,
-      error: "Failed to perform database cleanup",
-      details: error instanceof Error ? error.message : "Unknown error",
-      timestamp: new Date().toISOString(),
-    };
-
-    res.status(500).json(errorResponse);
+    handleError(res, error, "Failed to perform database cleanup");
   }
 });
 
 // POST /api/database/optimize - Trigger database optimization
 router.post("/optimize", authenticateToken, async (req: AuthRequest, res) => {
   try {
-    // Only allow admin users to trigger optimization
-    if (req.user.subscription_type !== "GOLD") {
-      return res.status(403).json({
-        success: false,
-        error: "Insufficient permissions for database optimization",
-      });
-    }
+    if (!requireGoldSubscription(req, res)) return;
 
-    console.log(
-      "⚡ Manual database optimization triggered by user:",
-      req.user.user_id
-    );
+    console.log("⚡ Database optimization by user:", req.user.user_id);
 
     await DatabaseOptimizationService.optimizeDatabase();
 
-    const response: ApiResponse = {
+    res.json({
       success: true,
       message: "Database optimization completed successfully",
       timestamp: new Date().toISOString(),
-    };
-
-    res.json(response);
+    });
   } catch (error) {
-    console.error("Error optimizing database:", error);
-
-    const errorResponse: ApiResponse = {
-      success: false,
-      error: "Failed to optimize database",
-      details: error instanceof Error ? error.message : "Unknown error",
-      timestamp: new Date().toISOString(),
-    };
-
-    res.status(500).json(errorResponse);
+    handleError(res, error, "Failed to optimize database");
   }
 });
 
-// GET /api/database/cron-status - Get cron job status
+// GET /api/database/cron-status - Get cron job status (NO CHANGES - already optimal)
 router.get("/cron-status", authenticateToken, async (req: AuthRequest, res) => {
   try {
     const status = EnhancedCronJobService.getJobStatus();
 
-    const response: ApiResponse = {
+    res.json({
       success: true,
       data: status,
       message: "Cron job status retrieved",
       timestamp: new Date().toISOString(),
-    };
-
-    res.json(response);
+    });
   } catch (error) {
-    console.error("Error getting cron status:", error);
-
-    const errorResponse: ApiResponse = {
-      success: false,
-      error: "Failed to get cron status",
-      details: error instanceof Error ? error.message : "Unknown error",
-      timestamp: new Date().toISOString(),
-    };
-
-    res.status(500).json(errorResponse);
+    handleError(res, error, "Failed to get cron status");
   }
 });
 
@@ -148,42 +108,22 @@ router.post(
   authenticateToken,
   async (req: AuthRequest, res) => {
     try {
-      // Only allow admin users to trigger emergency recovery
-      if (req.user.subscription_type !== "GOLD") {
-        return res.status(403).json({
-          success: false,
-          error: "Insufficient permissions for emergency recovery",
-        });
-      }
+      if (!requireGoldSubscription(req, res)) return;
 
-      console.log(
-        "🚨 Emergency database recovery triggered by user:",
-        req.user.user_id
-      );
+      console.log("🚨 Emergency recovery by user:", req.user.user_id);
 
       const recovered = await DatabaseOptimizationService.emergencyRecovery();
 
-      const response: ApiResponse = {
+      res.status(recovered ? 200 : 500).json({
         success: recovered,
         data: { recovered },
         message: recovered
           ? "Emergency recovery completed successfully"
           : "Emergency recovery failed",
         timestamp: new Date().toISOString(),
-      };
-
-      res.status(recovered ? 200 : 500).json(response);
+      });
     } catch (error) {
-      console.error("Error in emergency recovery:", error);
-
-      const errorResponse: ApiResponse = {
-        success: false,
-        error: "Emergency recovery failed",
-        details: error instanceof Error ? error.message : "Unknown error",
-        timestamp: new Date().toISOString(),
-      };
-
-      res.status(500).json(errorResponse);
+      handleError(res, error, "Emergency recovery failed");
     }
   }
 );

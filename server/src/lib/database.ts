@@ -4,59 +4,67 @@ declare global {
   var __prisma: PrismaClient | undefined;
 }
 
-// Get database URL from environment
+// Get database URL with connection pooling parameters
 const getDatabaseUrl = () => {
   const url = process.env.DATABASE_URL;
   if (!url) {
     throw new Error("DATABASE_URL environment variable is not set");
   }
+
+  // Add connection pooling parameters if not present
+  if (!url.includes("connection_limit")) {
+    const separator = url.includes("?") ? "&" : "?";
+    return `${url}${separator}connection_limit=10&pool_timeout=20`;
+  }
+
   return url;
 };
 
-// Create Prisma client with proper configuration
+// Create Prisma client with optimized configuration
 export const prisma =
   globalThis.__prisma ||
   new PrismaClient({
-    log:
-      process.env.NODE_ENV === "development"
-        ? ["query", "error", "warn"]
-        : ["error"],
-    errorFormat: "pretty",
+    log: process.env.NODE_ENV === "development" ? ["error", "warn"] : ["error"],
+    datasources: {
+      db: {
+        url: getDatabaseUrl(),
+      },
+    },
   });
 
 if (process.env.NODE_ENV === "development") {
   globalThis.__prisma = prisma;
 }
 
-// Database connection with health monitoring
-prisma
-  .$connect()
-  .then(async () => {
-    console.log("✅ Database connected successfully");
+// Optimized connection with retry logic
+let isConnected = false;
 
-    // Run initial health check
-    try {
-      await prisma.$queryRaw`SELECT 1`;
-      console.log("📊 Database health check passed");
-    } catch (error) {
-      console.error("⚠️ Database health check failed:", error);
-    }
-  })
-  .catch((error) => {
+export async function connectDatabase() {
+  if (isConnected) return;
+
+  try {
+    await prisma.$connect();
+
+    // Quick health check
+    await prisma.$queryRaw`SELECT 1`;
+
+    isConnected = true;
+    console.log("✅ Database connected successfully");
+    console.log("📊 Database health check passed");
+  } catch (error) {
     console.error("❌ Database connection failed:", error);
-  });
+    throw error;
+  }
+}
 
 // Graceful shutdown
-process.on("beforeExit", async () => {
-  await prisma.$disconnect();
-});
+const disconnect = async () => {
+  if (isConnected) {
+    await prisma.$disconnect();
+    isConnected = false;
+  }
+};
 
-process.on("SIGINT", async () => {
-  await prisma.$disconnect();
-  process.exit(0);
-});
-
-process.on("SIGTERM", async () => {
-  await prisma.$disconnect();
-  process.exit(0);
-});
+process.on("beforeExit", disconnect);
+process.on("SIGINT", disconnect);
+process.on("SIGTERM", disconnect);

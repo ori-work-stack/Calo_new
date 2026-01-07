@@ -10,22 +10,37 @@ export class DatabaseOptimizationService {
     try {
       console.log("🔍 Checking database health...");
 
-      // Check connection
-      await prisma.$connect();
-
-      // Get database size and statistics
+      // Run ALL queries in PARALLEL (not sequential!)
       const [
         userCount,
         mealCount,
         sessionCount,
         recommendationCount,
         chatMessageCount,
+        expiredSessions,
+        oldRecommendations,
       ] = await Promise.all([
         prisma.user.count(),
         prisma.meal.count(),
         prisma.session.count(),
         prisma.aiRecommendation.count(),
         prisma.chatMessage.count(),
+        // Check for expired sessions (parallel)
+        prisma.session.count({
+          where: {
+            expiresAt: {
+              lt: new Date(),
+            },
+          },
+        }),
+        // Check for old recommendations (parallel)
+        prisma.aiRecommendation.count({
+          where: {
+            created_at: {
+              lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+            },
+          },
+        }),
       ]);
 
       const totalRecords =
@@ -34,25 +49,7 @@ export class DatabaseOptimizationService {
         sessionCount +
         recommendationCount +
         chatMessageCount;
-      const estimatedSize = totalRecords * 0.001; // Rough estimate in MB
-
-      // Check for expired sessions
-      const expiredSessions = await prisma.session.count({
-        where: {
-          expiresAt: {
-            lt: new Date(),
-          },
-        },
-      });
-
-      // Check for old recommendations
-      const oldRecommendations = await prisma.aiRecommendation.count({
-        where: {
-          created_at: {
-            lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
-          },
-        },
-      });
+      const estimatedSize = totalRecords * 0.001;
 
       const needsCleanup =
         expiredSessions > 100 ||
@@ -69,9 +66,9 @@ export class DatabaseOptimizationService {
       const health: DatabaseHealth = {
         status,
         size: estimatedSize,
-        maxSize: 100, // 100MB limit
-        connectionCount: 1, // Single connection in this context
-        lastCleanup: new Date(), // Would track actual last cleanup
+        maxSize: 100,
+        connectionCount: 1,
+        lastCleanup: new Date(),
         needsCleanup,
       };
 
@@ -89,7 +86,6 @@ export class DatabaseOptimizationService {
       };
     }
   }
-
   /**
    * Intelligent database cleanup with safety checks
    */

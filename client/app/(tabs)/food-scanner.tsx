@@ -16,7 +16,6 @@ import {
   StatusBar,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { LinearGradient } from "expo-linear-gradient";
 import { Camera, CameraType, CameraView } from "expo-camera";
 import * as ImagePicker from "expo-image-picker";
 import {

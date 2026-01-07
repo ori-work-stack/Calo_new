@@ -206,7 +206,7 @@ export default function CalendarScreen() {
         dispatch(getStatistics({ year, month })).unwrap(),
         dispatch(getEnhancedStatistics({ year, month })).unwrap(),
       ]);
-
+      console.log(results);
       const [calendarResult, statsResult, enhancedResult] = results;
 
       if (calendarResult.status === "rejected") {

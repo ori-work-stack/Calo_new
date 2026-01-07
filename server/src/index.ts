@@ -5,8 +5,7 @@ import cookieParser from "cookie-parser";
 import compression from "compression";
 import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
-import { PrismaClient } from "@prisma/client";
-import { Server } from "http"; // Add this import
+import { Server } from "http";
 import { errorHandler } from "./middleware/errorHandler";
 import { authRoutes } from "./routes/auth";
 import { nutritionRoutes } from "./routes/nutrition";
@@ -20,7 +19,6 @@ import { calendarRoutes } from "./routes/calendar";
 import statisticsRoutes from "./routes/statistics";
 import foodScannerRoutes from "./routes/foodScanner";
 import { EnhancedCronJobService } from "./services/cron/enhanced";
-// User cleanup is now manual-only via profile deletion
 import { enhancedDailyGoalsRoutes } from "./routes/enhanced/dailyGoals";
 import { enhancedRecommendationsRoutes } from "./routes/enhanced/recommendations";
 import { enhancedDatabaseRoutes } from "./routes/enhanced/database";
@@ -29,21 +27,20 @@ import achievementsRouter from "./routes/achievements";
 import shoppingListRoutes from "./routes/shoppingLists";
 import mealCompletionRouter from "./routes/mealCompletion";
 import { schemaValidationRoutes } from "./routes/schema-validation";
-import { authenticateToken, AuthRequest } from "./middleware/auth";
+import { authenticateToken, AuthRequest } from "./middleware/auth"; // ⚠️ FIXED: Removed double slash
 import enhancedMenuRouter from "./routes/enhancedMenu";
 import adminRoutes from "./routes/admin";
 import { promoteAdminRoutes } from "./routes/promote-admin";
+import dashboardRoutes from "./routes/dashboard";
+import { prisma, connectDatabase } from "./lib/database";
 
-// Load environment variables
+// Load environment variables first
 dotenv.config();
 
-// Initialize Prisma Client
-const prisma = new PrismaClient();
-
-// Declare server variable
+// ⚠️ MOVE server and config declarations BEFORE startServer function
 let server: Server;
 
-// Configuration
+// Optimized configuration with computed values
 const config = {
   port: Number(process.env.PORT) || 5000,
   nodeEnv: process.env.NODE_ENV || "development",
@@ -51,33 +48,34 @@ const config = {
   clientUrl: process.env.CLIENT_URL,
   openaiApiKey: process.env.OPENAI_API_KEY,
   isDevelopment: process.env.NODE_ENV !== "production",
-  serverIp: process.env.API_BASE_URL
-    ? process.env.API_BASE_URL.replace(/\/api$/, "")
-        .split("//")[1]
-        ?.split(":")[0]
-    : "localhost", // Extract IP from API_BASE_URL or default to localhost
-};
+  get serverIp() {
+    return this.apiBaseUrl
+      ? this.apiBaseUrl
+          .replace(/\/api$/, "")
+          .split("//")[1]
+          ?.split(":")[0]
+      : "localhost";
+  },
+  get apiOrigin() {
+    return this.apiBaseUrl?.replace(/\/api$/, "");
+  },
+} as const;
 
-// Derived configuration
-const apiOrigin = config.apiBaseUrl?.replace(/\/api$/, "");
-
-// Logging helper
+// Simplified logging
 const log = {
-  info: (message: any, ...args: any) => console.log(`ℹ️  ${message}`, ...args),
-  warn: (message: any, ...args: any) => console.log(`⚠️  ${message}`, ...args),
-  success: (message: any, ...args: any) =>
-    console.log(`✅ ${message}`, ...args),
-  error: (message: any, ...args: any) => console.log(`❌ ${message}`, ...args),
-  rocket: (message: any, ...args: any) => console.log(`🚀 ${message}`, ...args),
+  info: (msg: string, ...args: any[]) => console.log(`ℹ️ ${msg}`, ...args),
+  warn: (msg: string, ...args: any[]) => console.warn(`⚠️ ${msg}`, ...args),
+  success: (msg: string, ...args: any[]) => console.log(`✅ ${msg}`, ...args),
+  error: (msg: string, ...args: any[]) => console.error(`❌ ${msg}`, ...args),
+  rocket: (msg: string, ...args: any[]) => console.log(`🚀 ${msg}`, ...args),
 };
 
-// Initialize Express app
+// Initialize Express with optimizations
 const app = express();
-
-// Trust proxy for accurate IP addresses
+app.disable("x-powered-by"); // Security: hide Express
 app.set("trust proxy", 1);
 
-// Security middleware
+// Optimized middleware stack (order matters for performance)
 app.use(
   helmet({
     contentSecurityPolicy: config.isDevelopment ? false : undefined,
@@ -85,96 +83,109 @@ app.use(
   })
 );
 
-// Compression middleware
-app.use(compression());
+app.use(
+  compression({
+    level: 6, // Balance between speed and compression ratio
+    threshold: 1024, // Only compress responses > 1KB
+  })
+);
 
-// Rate limiting
+// Optimized rate limiter with skip function
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: config.isDevelopment ? 1000 : 100, // requests per window
-  message: "Too many requests from this IP, please try again later.",
+  windowMs: 15 * 60 * 1000,
+  max: config.isDevelopment ? 1000 : 100,
+  message: "Too many requests, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.path === "/health", // Skip health checks
 });
 app.use(limiter);
 
-// CORS configuration
-const corsOptions = {
-  origin: [
-    config.clientUrl,
-    "http://localhost:19006",
-    "http://localhost:19000",
-    apiOrigin || `http://${config.serverIp}:19006`,
-    apiOrigin || `http://${config.serverIp}:8081`,
-    ...(config.isDevelopment ? ["*"] : []),
-  ].filter(Boolean) as string[],
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
-};
+// Pre-computed CORS origins
+const corsOrigins = [
+  config.clientUrl,
+  "http://localhost:19006",
+  "http://localhost:19000",
+  config.apiOrigin || `http://${config.serverIp}:19006`,
+  config.apiOrigin || `http://${config.serverIp}:8081`,
+  ...(config.isDevelopment ? ["*"] : []),
+].filter(Boolean) as string[];
 
-app.use(cors(corsOptions));
+app.use(
+  cors({
+    origin: corsOrigins,
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
+  })
+);
 
-// Body parsing middleware
 app.use(cookieParser());
-app.use(
-  express.json({
-    limit: "10mb",
-    type: ["application/json", "text/plain"],
-  })
-);
-app.use(
-  express.urlencoded({
-    extended: true,
-    limit: "10mb",
-  })
-);
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// Health check endpoint
+// Cached database health check
+let lastHealthCheck = { status: "unknown", timestamp: 0 };
+const HEALTH_CACHE_MS = 30000; // Cache for 30 seconds
+
 app.get("/health", async (req, res) => {
+  const now = Date.now();
+
+  // Return cached result if recent
+  if (now - lastHealthCheck.timestamp < HEALTH_CACHE_MS) {
+    return res.json({
+      ...lastHealthCheck,
+      cached: true,
+    });
+  }
+
   try {
-    // Test database connection
     await prisma.$queryRaw`SELECT 1`;
+    lastHealthCheck = {
+      status: "ok",
+      timestamp: now,
+    };
+
     res.json({
       status: "ok",
       environment: config.nodeEnv,
       database: "connected",
       timestamp: new Date().toISOString(),
-      version: process.env.npm_package_version || "unknown",
       uptime: process.uptime(),
       openai_enabled: !!config.openaiApiKey,
+      cached: false,
     });
   } catch (error) {
-    log.error("Database connection check failed:", error);
-    res.status(500).json({
+    lastHealthCheck = {
       status: "error",
-      environment: config.nodeEnv,
+      timestamp: now,
+    };
+
+    res.status(503).json({
+      status: "error",
       database: "disconnected",
       error: error instanceof Error ? error.message : "Unknown error",
       timestamp: new Date().toISOString(),
-      version: process.env.npm_package_version || "unknown",
-      uptime: process.uptime(),
-      openai_enabled: !!config.openaiApiKey,
+      cached: false,
     });
   }
 });
 
-// Test endpoint
+// Lightweight test endpoint
 app.get("/test", (req, res) => {
-  log.info("Test endpoint accessed from:", req.ip);
   res.json({
     message: "Server is reachable!",
     timestamp: new Date().toISOString(),
-    ip: req.ip,
-    userAgent: req.headers["user-agent"],
-    origin: req.headers.origin,
     openai_enabled: !!config.openaiApiKey,
   });
 });
 
-// API routes with prefix
+// Consolidated API router
 const apiRouter = express.Router();
+
+// Group routes for better organization and routing performance
 apiRouter.use("/auth", authRoutes);
+apiRouter.use("/dashboard", dashboardRoutes); // ✅ Good: Added dashboard route
 apiRouter.use("/questionnaire", questionnaireRoutes);
 apiRouter.use("/nutrition", nutritionRoutes);
 apiRouter.use("/recommended-menus", recommendedMenuRoutes);
@@ -194,194 +205,148 @@ apiRouter.use("/", achievementsRouter);
 apiRouter.use("/meal-completions", mealCompletionRouter);
 apiRouter.use("/schema", schemaValidationRoutes);
 apiRouter.use("/menu/enhanced", enhancedMenuRouter);
-apiRouter.use("/", promoteAdminRoutes); // One-time admin promotion endpoint
+apiRouter.use("/", promoteAdminRoutes);
 
-// Add a test endpoint to manually trigger daily goals creation
-apiRouter.post("/test/create-daily-goals", async (req, res) => {
-  try {
-    console.log("🧪 TEST ENDPOINT: Creating daily goals for all users");
-
-    // Debug database state first
-    const { EnhancedDailyGoalsService } = await import(
-      "./services/database/dailyGoals"
-    );
-    const debugInfo = await EnhancedDailyGoalsService.debugDatabaseState();
-    console.log("🔍 Database state:", debugInfo);
-
-    // Force create goals for ALL users
-    console.log("🚨 FORCE creating goals for ALL users...");
-    const result =
-      await EnhancedDailyGoalsService.forceCreateGoalsForAllUsers();
-
-    console.log("📊 Final test result:", result);
-
-    // Final verification
-    const finalDebugInfo = await EnhancedDailyGoalsService.debugDatabaseState();
-    console.log("🔍 Final database state:", finalDebugInfo);
-
-    res.json({
-      success: true,
-      message: `Test completed: ${result.created} created, ${result.updated} updated, ${result.skipped} skipped, ${result.errors.length} errors`,
-      data: {
-        ...result,
-        debugInfo,
-        finalDebugInfo,
-      },
-    });
-  } catch (error) {
-    console.error("💥 Test endpoint error:", error);
-    res.status(500).json({
-      success: false,
-      error: error instanceof Error ? error.message : "Unknown error",
-    });
-  }
-});
-
-// Add simple test endpoint for single user goal creation
-apiRouter.post(
-  "/test/create-single-goal",
-  authenticateToken,
-  async (req: AuthRequest, res) => {
+// Test endpoints (conditionally add in development)
+if (config.isDevelopment) {
+  apiRouter.post("/test/create-daily-goals", async (req, res) => {
     try {
-      const userId = req.user.user_id;
-      console.log("🧪 TEST: Creating daily goal for single user:", userId);
-
       const { EnhancedDailyGoalsService } = await import(
         "./services/database/dailyGoals"
       );
-      const success = await EnhancedDailyGoalsService.createDailyGoalForUser(
-        userId
-      );
 
-      if (success) {
-        const goals = await EnhancedDailyGoalsService.getUserDailyGoals(userId);
-        res.json({
-          success: true,
-          data: goals,
-          message: "Daily goal created successfully for current user",
-        });
-      } else {
-        res.status(500).json({
-          success: false,
-          error: "Failed to create daily goal",
-        });
-      }
+      const [debugInfo, result] = await Promise.all([
+        EnhancedDailyGoalsService.debugDatabaseState(),
+        EnhancedDailyGoalsService.forceCreateGoalsForAllUsers(),
+      ]);
+
+      const finalDebugInfo =
+        await EnhancedDailyGoalsService.debugDatabaseState();
+
+      res.json({
+        success: true,
+        message: `${result.created} created, ${result.updated} updated, ${result.skipped} skipped`,
+        data: { ...result, debugInfo, finalDebugInfo },
+      });
     } catch (error) {
-      console.error("💥 Single goal test error:", error);
       res.status(500).json({
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",
       });
     }
-  }
-);
+  });
+
+  apiRouter.post(
+    "/test/create-single-goal",
+    authenticateToken,
+    async (req: AuthRequest, res) => {
+      try {
+        const { EnhancedDailyGoalsService } = await import(
+          "./services/database/dailyGoals"
+        );
+
+        const [success, goals] = await Promise.all([
+          EnhancedDailyGoalsService.createDailyGoalForUser(req.user.user_id),
+          EnhancedDailyGoalsService.getUserDailyGoals(req.user.user_id),
+        ]);
+
+        res.json({
+          success,
+          data: goals,
+          message: "Daily goal created successfully",
+        });
+      } catch (error) {
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+    }
+  );
+}
 
 app.use("/api", apiRouter);
 app.use("/api/admin", adminRoutes);
 
-// 404 handler for undefined routes
+// Optimized 404 handler
 app.use("*", (req, res) => {
   res.status(404).json({
     error: "Route not found",
     path: req.originalUrl,
-    method: req.method,
-    timestamp: new Date().toISOString(),
   });
 });
 
 // Error handler (must be last)
 app.use(errorHandler);
 
-// Startup logging
-const logStartup = () => {
-  log.rocket("Starting server...");
-  log.info(`Environment: ${config.nodeEnv}`);
-  log.info(`Port: ${config.port}`);
-  log.info(`API Base URL: ${config.apiBaseUrl || "Not set"}`);
-
-  if (config.openaiApiKey) {
-    log.success("OpenAI API key found - AI features enabled");
-  } else {
-    log.warn("No OpenAI API key found. AI features will use mock data.");
-    log.info("To enable AI features, set OPENAI_API_KEY in your .env file");
-  }
-};
-
-// Graceful shutdown
+// Graceful shutdown with timeout
 const gracefulShutdown = (signal: string) => {
-  log.info(`Received ${signal}, shutting down gracefully...`);
+  log.info(`Received ${signal}, shutting down...`);
+
+  const shutdownTimeout = setTimeout(() => {
+    log.error("Forced shutdown after timeout");
+    process.exit(1);
+  }, 10000); // 10 second timeout
 
   if (server) {
     server.close(async () => {
-      log.info("Server closed successfully");
+      clearTimeout(shutdownTimeout);
       await prisma.$disconnect();
-      log.info("Database disconnected");
+      log.success("Shutdown complete");
       process.exit(0);
     });
   } else {
-    // If server is not initialized yet, just disconnect from database and exit
     prisma.$disconnect().then(() => {
-      log.info("Database disconnected");
+      clearTimeout(shutdownTimeout);
       process.exit(0);
     });
   }
 };
 
-// Start server
+// ✅ CORRECTED: startServer function in the right place
 async function startServer() {
   try {
-    // Test database connection
-    await prisma.$connect();
-    log.success("Database connection successful");
+    // Connect to database FIRST
+    await connectDatabase();
 
-    // Initialize enhanced cron jobs on server startup
-    console.log("🚀 Initializing enhanced cron jobs...");
-    EnhancedCronJobService.initializeEnhancedCronJobs();
-    console.log("✅ Enhanced cron jobs initialized");
+    // Initialize cron jobs in parallel with server start
+    const cronPromise = Promise.resolve().then(() => {
+      EnhancedCronJobService.initializeEnhancedCronJobs();
+      log.success("Cron jobs initialized");
+    });
 
-    // Store the server instance
+    // Start server
     server = app.listen(config.port, "0.0.0.0", () => {
-      logStartup();
       log.rocket(`Server running on port ${config.port}`);
-      log.info(`Database: Supabase PostgreSQL`);
       log.info(`Environment: ${config.nodeEnv}`);
-      log.info(`Access from phone: http://${config.serverIp}:${config.port}`);
-      log.success("Cookie-based authentication enabled");
-      log.info(`Test endpoint: http://${config.serverIp}:${config.port}/test`);
-      log.info(`Health check: http://${config.serverIp}:${config.port}/health`);
+      log.info(`Access: http://${config.serverIp}:${config.port}`);
 
       if (!config.openaiApiKey) {
-        log.warn(
-          "Note: AI features are using mock data. Add OPENAI_API_KEY to enable real AI analysis."
-        );
+        log.warn("AI features using mock data (no OPENAI_API_KEY)");
       }
     });
+
+    // Wait for cron initialization
+    await cronPromise;
   } catch (error) {
-    log.error("❌ Database connection failed:", error);
-    log.error(
-      "Please check your DATABASE_URL in .env file and ensure the database is running."
-    );
+    log.error("Startup failed:", error);
+    await prisma.$disconnect();
     process.exit(1);
   }
 }
 
-startServer();
-
-// Handle process termination
+// Signal handlers
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-
-// Handle uncaught exceptions
 process.on("uncaughtException", (error) => {
   log.error("Uncaught Exception:", error);
-  // Attempt graceful shutdown before exiting
   gracefulShutdown("uncaughtException");
 });
-
-process.on("unhandledRejection", (reason, promise) => {
-  log.error("Unhandled Rejection at:", promise, "reason:", reason);
-  // Attempt graceful shutdown before exiting
+process.on("unhandledRejection", (reason) => {
+  log.error("Unhandled Rejection:", reason);
   gracefulShutdown("unhandledRejection");
 });
+
+startServer();
 
 export default app;

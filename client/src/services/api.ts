@@ -1,6 +1,5 @@
-import axios, { AxiosInstance, AxiosResponse, AxiosError } from "axios";
+import axios, { AxiosInstance, AxiosError } from "axios";
 import { Platform } from "react-native";
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as SecureStore from "expo-secure-store";
 import {
   SignUpData,
@@ -9,7 +8,173 @@ import {
   QuestionnaireData,
 } from "../types";
 
-// Enhanced error handling and retry logic
+// ==================== PERFORMANCE OPTIMIZATIONS ====================
+
+// 1. In-memory token cache to avoid async storage reads on every request
+let cachedToken: string | null = null;
+let tokenCacheTimestamp: number = 0;
+const TOKEN_CACHE_DURATION = 60000; // 1 minute cache
+
+// 2. Request queue for batching similar requests
+const requestQueue: Map<string, Promise<any>> = new Map();
+
+// 3. Response cache with TTL
+interface CacheEntry {
+  data: any;
+  timestamp: number;
+  ttl: number;
+}
+const responseCache: Map<string, CacheEntry> = new Map();
+
+// 4. Parallel request limiter to prevent overwhelming the server
+const MAX_PARALLEL_REQUESTS = 6;
+let activeRequests = 0;
+const requestQueue2: Array<() => Promise<any>> = [];
+
+// ==================== HELPER FUNCTIONS ====================
+
+// Fast token retrieval with cache
+const getStoredToken = async (): Promise<string | null> => {
+  const now = Date.now();
+
+  // Return cached token if still valid
+  if (cachedToken && now - tokenCacheTimestamp < TOKEN_CACHE_DURATION) {
+    return cachedToken;
+  }
+
+  try {
+    const token =
+      Platform.OS === "web"
+        ? localStorage.getItem("auth_token")
+        : await SecureStore.getItemAsync("auth_token_secure");
+
+    // Update cache
+    cachedToken = token;
+    tokenCacheTimestamp = now;
+
+    return token;
+  } catch (error) {
+    console.error("Error getting stored token:", error);
+    return null;
+  }
+};
+
+const setStoredToken = async (token: string): Promise<void> => {
+  try {
+    // Update cache immediately
+    cachedToken = token;
+    tokenCacheTimestamp = Date.now();
+
+    // Store asynchronously without awaiting
+    if (Platform.OS === "web") {
+      localStorage.setItem("auth_token", token);
+    } else {
+      SecureStore.setItemAsync("auth_token_secure", token).catch(console.error);
+    }
+  } catch (error) {
+    console.error("Error storing token:", error);
+    throw new APIError("Failed to store authentication token");
+  }
+};
+
+const clearStoredToken = async (): Promise<void> => {
+  // Clear cache immediately
+  cachedToken = null;
+  tokenCacheTimestamp = 0;
+
+  try {
+    if (Platform.OS === "web") {
+      localStorage.removeItem("auth_token");
+    } else {
+      await SecureStore.deleteItemAsync("auth_token_secure");
+    }
+  } catch (error) {
+    console.error("Error clearing token:", error);
+  }
+};
+
+// Generate cache key for requests
+const getCacheKey = (method: string, url: string, params?: any): string => {
+  return `${method}:${url}:${JSON.stringify(params || {})}`;
+};
+
+// Get cached response if valid
+const getCachedResponse = (cacheKey: string): any | null => {
+  const entry = responseCache.get(cacheKey);
+  if (!entry) return null;
+
+  const now = Date.now();
+  if (now - entry.timestamp > entry.ttl) {
+    responseCache.delete(cacheKey);
+    return null;
+  }
+
+  return entry.data;
+};
+
+// Set cached response
+const setCachedResponse = (cacheKey: string, data: any, ttl: number): void => {
+  responseCache.set(cacheKey, {
+    data,
+    timestamp: Date.now(),
+    ttl,
+  });
+};
+
+// Request deduplication - prevent multiple identical requests
+const deduplicateRequest = async <T>(
+  key: string,
+  requestFn: () => Promise<T>
+): Promise<T> => {
+  // If same request is already in flight, return that promise
+  if (requestQueue.has(key)) {
+    return requestQueue.get(key) as Promise<T>;
+  }
+
+  const promise = requestFn().finally(() => {
+    requestQueue.delete(key);
+  });
+
+  requestQueue.set(key, promise);
+  return promise;
+};
+
+// Parallel request throttling
+const throttleRequest = async <T>(requestFn: () => Promise<T>): Promise<T> => {
+  if (activeRequests >= MAX_PARALLEL_REQUESTS) {
+    // Queue the request
+    return new Promise((resolve, reject) => {
+      requestQueue2.push(async () => {
+        try {
+          const result = await requestFn();
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  }
+
+  activeRequests++;
+
+  try {
+    const result = await requestFn();
+    return result;
+  } finally {
+    activeRequests--;
+
+    // Process next queued request
+    if (requestQueue2.length > 0) {
+      const nextRequest = requestQueue2.shift();
+      if (nextRequest) {
+        nextRequest();
+      }
+    }
+  }
+};
+
+// ==================== ERROR HANDLING ====================
+
 class APIError extends Error {
   constructor(
     message: string,
@@ -22,92 +187,87 @@ class APIError extends Error {
   }
 }
 
-// Optimized API configuration
+// ==================== API CONFIGURATION ====================
+
 const getApiBaseUrl = (): string => {
   const baseUrl = process.env.EXPO_PUBLIC_API_URL;
+
+  console.log("🌐 API Base URL:", baseUrl); // DEBUG
+
   if (!baseUrl) {
+    console.error("❌ EXPO_PUBLIC_API_URL is not set!");
+    console.error("Available env vars:", Object.keys(process.env));
     throw new Error("API_URL environment variable is not configured");
   }
+
   return baseUrl;
 };
+// ==================== AXIOS INSTANCE ====================
 
-// Enhanced axios instance with better error handling
 const createApiInstance = (): AxiosInstance => {
   const instance = axios.create({
     baseURL: getApiBaseUrl(),
-    timeout: 15000, // 15 second timeout
+    timeout: 10000, // Reduced from 15s to 10s for faster failures
     withCredentials: Platform.OS === "web",
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
     },
+    // Enable HTTP/2 multiplexing if available
+    httpAgent: undefined,
+    httpsAgent: undefined,
   });
 
-  // Request interceptor for auth tokens
+  // Optimized request interceptor
   instance.interceptors.request.use(
     async (config) => {
-      try {
-        const token = await getStoredToken();
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`;
-        }
-      } catch (error) {
-        console.warn("Failed to get stored token:", error);
+      // Use cached token to avoid async storage read
+      const token = await getStoredToken();
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
       }
       return config;
     },
     (error) => Promise.reject(error)
   );
 
-  // Enhanced response interceptor with retry logic
+  // Optimized response interceptor with faster retry logic
   instance.interceptors.response.use(
     (response) => response,
     async (error: AxiosError) => {
       const originalRequest = error.config as any;
 
-      // Handle network errors with retry
+      // Fast fail for non-retryable errors
+      if (error.response?.status === 400 || error.response?.status === 404) {
+        return Promise.reject(error);
+      }
+
+      // Handle 401 errors
+      if (error.response?.status === 401 && !originalRequest._retry) {
+        originalRequest._retry = true;
+        await clearStoredToken();
+
+        // Don't await these - fire and forget for speed
+        import("../store").then(({ store }) => {
+          import("../store/authSlice").then(({ signOut }) => {
+            store.dispatch(signOut());
+          });
+        });
+
+        import("expo-router").then(({ router }) => {
+          router.replace("/(auth)/welcome");
+        });
+      }
+
+      // Single retry for network errors only
       if (!error.response && !originalRequest._retry) {
         originalRequest._retry = true;
-        console.log("🔄 Retrying failed network request...");
 
-        // Wait 1 second before retry
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        // Immediate retry without delay
         return instance(originalRequest);
       }
 
-      // Handle 401 errors (token expiration/invalid token)
-      if (error.response?.status === 401 && !originalRequest._retry) {
-        originalRequest._retry = true;
-
-        try {
-          // Clear invalid token
-          await clearStoredToken();
-          console.log("🔒 Token invalid/expired - clearing and logging out");
-
-          // Import store dynamically to avoid circular dependencies
-          const { store } = await import("../store");
-          const { signOut } = await import("../store/authSlice");
-
-          // Dispatch logout
-          store.dispatch(signOut());
-
-          // Redirect to welcome page using router
-          const { router } = await import("expo-router");
-          router.replace("/(auth)/welcome");
-        } catch (clearError) {
-          console.warn("⚠️ Failed to handle 401 error:", clearError);
-        }
-      }
-
-      // Transform error for better handling
-      const apiError = new APIError(
-        error.message || "Network error",
-        error.response?.status,
-        error.code,
-        error.response?.status ? error.response.status >= 500 : true
-      );
-
-      return Promise.reject(apiError);
+      return Promise.reject(error);
     }
   );
 
@@ -116,285 +276,141 @@ const createApiInstance = (): AxiosInstance => {
 
 const api = createApiInstance();
 
-// Enhanced token management with error handling
-const getStoredToken = async (): Promise<string | null> => {
-  try {
-    if (Platform.OS === "web") {
-      return localStorage.getItem("auth_token");
-    } else {
-      return await SecureStore.getItemAsync("auth_token_secure");
-    }
-  } catch (error) {
-    console.error("Error getting stored token:", error);
-    return null;
-  }
-};
+// ==================== API SERVICES ====================
 
-const setStoredToken = async (token: string): Promise<void> => {
-  try {
-    if (Platform.OS === "web") {
-      localStorage.setItem("auth_token", token);
-    } else {
-      await SecureStore.setItemAsync("auth_token_secure", token);
-    }
-  } catch (error) {
-    console.error("Error storing token:", error);
-    throw new APIError("Failed to store authentication token");
-  }
-};
-
-const clearStoredToken = async (): Promise<void> => {
-  try {
-    if (Platform.OS === "web") {
-      localStorage.removeItem("auth_token");
-    } else {
-      await SecureStore.deleteItemAsync("auth_token_secure");
-    }
-  } catch (error) {
-    console.error("Error clearing token:", error);
-  }
-};
-
-// Enhanced API service with comprehensive error handling
 export const authAPI = {
   async signUp(data: SignUpData): Promise<any> {
-    try {
-      console.log("🔄 Signing up user...");
-      const response = await api.post("/auth/signup", data);
-
-      if (response.data.success) {
-        console.log("✅ Signup successful");
-        return response.data;
-      }
-
+    const response = await api.post("/auth/signup", data);
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Signup failed");
-    } catch (error) {
-      console.error("💥 Signup error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError(
-        "Network error during signup",
-        undefined,
-        undefined,
-        true
-      );
     }
+    return response.data;
   },
 
   async signIn(data: SignInData): Promise<any> {
-    try {
-      console.log("🔄 Signing in user...");
-      const response = await api.post("/auth/signin", data);
-
-      if (response.data.success && response.data.token) {
-        await setStoredToken(response.data.token);
-        console.log("✅ Signin successful, token stored");
-        console.log(
-          "📦 Raw signin response:",
-          JSON.stringify(response.data, null, 2)
-        );
-        console.log(
-          "👤 User from signin:",
-          JSON.stringify(response.data.user, null, 2)
-        );
-        console.log("🔑 Admin fields from API:", {
-          is_admin: response.data.user?.is_admin,
-          is_super_admin: response.data.user?.is_super_admin,
-        });
-        return response.data;
-      }
-
-      throw new APIError(response.data.error || "Signin failed");
-    } catch (error) {
-      console.error("💥 Signin error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError(
-        "Network error during signin",
-        undefined,
-        undefined,
-        true
-      );
+    const response = await api.post("/auth/signin", data);
+    if (response.data.success && response.data.token) {
+      // Store token without awaiting
+      setStoredToken(response.data.token);
+      return response.data;
     }
+    throw new APIError(response.data.error || "Signin failed");
   },
 
   async verifyEmail(email: string, code: string): Promise<any> {
-    try {
-      console.log("🔄 Verifying email...");
-      const response = await api.post("/auth/verify-email", { email, code });
-
-      if (response.data.success && response.data.token) {
-        await setStoredToken(response.data.token);
-        console.log("✅ Email verification successful");
-        return response.data;
-      }
-
-      throw new APIError(response.data.error || "Email verification failed");
-    } catch (error) {
-      console.error("💥 Email verification error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError(
-        "Network error during email verification",
-        undefined,
-        undefined,
-        true
-      );
+    const response = await api.post("/auth/verify-email", { email, code });
+    if (response.data.success && response.data.token) {
+      setStoredToken(response.data.token);
+      return response.data;
     }
+    throw new APIError(response.data.error || "Email verification failed");
   },
 
   signOut: async (): Promise<void> => {
-    try {
-      await AsyncStorage.removeItem("auth_token");
-      if (Platform.OS !== "web") {
-        const SecureStore = require("expo-secure-store");
-        await SecureStore.deleteItemAsync("auth_token_secure");
-      }
-      delete api.defaults.headers.common["Authorization"];
-    } catch (error) {
-      console.error("Error during sign out:", error);
-    }
+    await clearStoredToken();
+    delete api.defaults.headers.common["Authorization"];
   },
 
-  uploadAvatar: async (
-    base64Image: string
-  ): Promise<{ success: boolean; avatar_url?: string; error?: string }> => {
-    try {
-      const response = await api.post("/user/avatar", {
-        avatar_base64: base64Image,
-      });
-      return response.data;
-    } catch (error: any) {
-      console.error("Upload avatar error:", error);
-      return {
-        success: false,
-        error: error.response?.data?.error || "Failed to upload avatar",
-      };
-    }
+  uploadAvatar: async (base64Image: string): Promise<any> => {
+    const response = await api.post("/user/avatar", {
+      avatar_base64: base64Image,
+    });
+    return response.data;
   },
 
   async getStoredToken(): Promise<string | null> {
     return getStoredToken();
   },
 
-  // Added getCurrentUser function to fetch user data from /auth/me
   async getCurrentUser(): Promise<any> {
-    try {
-      console.log("🔄 Fetching current user...");
-      const response = await api.get("/auth/me");
-      console.log("✅ Current user fetched:", response.data);
-      console.log(
-        "👤 Full user data:",
-        JSON.stringify(response.data.user, null, 2)
-      );
-      return response.data;
-    } catch (error: any) {
-      console.error("💥 Get current user error:", error);
-      throw error.response?.data || error;
-    }
+    // Cache user data for 30 seconds
+    const cacheKey = getCacheKey("GET", "/auth/me");
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
+
+    const response = await api.get("/auth/me");
+    setCachedResponse(cacheKey, response.data, 30000);
+    return response.data;
   },
 };
 
-// Daily Goals API
+// ==================== DAILY GOALS API ====================
+
 export const dailyGoalsAPI = {
   async getDailyGoals(): Promise<any> {
-    try {
-      console.log("🎯 Fetching daily goals...");
+    // Cache for 5 minutes
+    const cacheKey = getCacheKey("GET", "/daily-goals");
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
+
+    return deduplicateRequest(cacheKey, async () => {
       const response = await api.get("/daily-goals");
-
-      if (response.data.success) {
-        console.log("✅ Daily goals fetched successfully");
-        return response.data;
+      if (!response.data.success) {
+        throw new APIError(
+          response.data.error || "Failed to fetch daily goals"
+        );
       }
-
-      throw new APIError(response.data.error || "Failed to fetch daily goals");
-    } catch (error) {
-      console.error("💥 Get daily goals error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while fetching daily goals");
-    }
+      setCachedResponse(cacheKey, response.data, 300000);
+      return response.data;
+    });
   },
 
   async getHistoricalGoals(startDate: string, endDate: string): Promise<any> {
-    try {
-      console.log("📊 Fetching historical daily goals...");
-      console.log("📅 Date range:", startDate, "to", endDate);
+    const cacheKey = getCacheKey("GET", "/daily-goals/history", {
+      startDate,
+      endDate,
+    });
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
+
+    return deduplicateRequest(cacheKey, async () => {
       const response = await api.get("/daily-goals/history", {
         params: { startDate, endDate },
       });
-
-      if (response.data.success) {
-        console.log(
-          `✅ Retrieved ${response.data.data.length} historical goals`
+      if (!response.data.success) {
+        throw new APIError(
+          response.data.error || "Failed to fetch historical goals"
         );
-        return response.data;
       }
-
-      throw new APIError(
-        response.data.error || "Failed to fetch historical daily goals"
-      );
-    } catch (error) {
-      console.error("💥 Get historical daily goals error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while fetching historical daily goals");
-    }
+      setCachedResponse(cacheKey, response.data, 600000); // 10 min cache
+      return response.data;
+    });
   },
 
   async getDailyGoalByDate(date: string): Promise<any> {
-    try {
-      console.log("📊 Fetching daily goal for date:", date);
-      const response = await api.get(`/daily-goals/by-date/${date}`);
+    const cacheKey = getCacheKey("GET", `/daily-goals/by-date/${date}`);
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
 
-      if (response.data.success) {
-        console.log("✅ Daily goal fetched successfully for", date);
-        return response.data;
-      }
-
-      throw new APIError(
-        response.data.error || "Failed to fetch daily goal for date"
-      );
-    } catch (error) {
-      console.error("💥 Get daily goal by date error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while fetching daily goal by date");
+    const response = await api.get(`/daily-goals/by-date/${date}`);
+    if (!response.data.success) {
+      throw new APIError(response.data.error || "Failed to fetch daily goal");
     }
+    setCachedResponse(cacheKey, response.data, 300000);
+    return response.data;
   },
 
   async createDailyGoals(): Promise<any> {
-    try {
-      console.log("🎯 Creating daily goals...");
-      const response = await api.put("/daily-goals");
-
-      if (response.data.success) {
-        console.log("✅ Daily goals created successfully");
-        return response.data;
-      }
-
+    const response = await api.put("/daily-goals");
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to create daily goals");
-    } catch (error) {
-      console.error("💥 Create daily goals error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while creating daily goals");
     }
+    // Invalidate cache
+    responseCache.clear();
+    return response.data;
   },
 
   async verifyDailyGoals(): Promise<any> {
-    try {
-      console.log("🔍 Verifying daily goals...");
-      const response = await api.get("/daily-goals/verify");
-
-      if (response.data.success) {
-        console.log("✅ Daily goals verified successfully");
-        return response.data;
-      }
-
+    const response = await api.get("/daily-goals/verify");
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to verify daily goals");
-    } catch (error) {
-      console.error("💥 Verify daily goals error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while verifying daily goals");
     }
+    return response.data;
   },
 };
 
-// Enhanced nutrition API with better error handling
+// ==================== NUTRITION API ====================
+
 export const nutritionAPI = {
   async analyzeMeal(
     imageBase64: string,
@@ -403,158 +419,38 @@ export const nutritionAPI = {
     language: string = "en",
     mealPeriod?: string
   ): Promise<any> {
-    try {
-      console.log("🔄 Analyzing meal...");
-
-      if (!imageBase64 || imageBase64.trim() === "") {
-        throw new APIError("Image data is required");
-      }
-
-      // Enhanced timeout and retry logic
-      const ANALYSIS_TIMEOUT = 45000; // 45 seconds
-      const MAX_RETRIES = 2;
-
-      let lastError: any;
-
-      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        try {
-          console.log(`🔄 Analysis attempt ${attempt + 1}/${MAX_RETRIES + 1}`);
-
-          const source = axios.CancelToken.source();
-          const timeout = setTimeout(() => {
-            source.cancel(
-              "Analysis timeout - please try again with a clearer image"
-            );
-          }, ANALYSIS_TIMEOUT);
-
-          try {
-            const response = await api.post(
-              "/nutrition/analyze",
-              {
-                imageBase64: imageBase64.trim(),
-                updateText,
-                editedIngredients,
-                language,
-                mealPeriod,
-              },
-              {
-                cancelToken: source.token,
-                timeout: ANALYSIS_TIMEOUT,
-                headers: {
-                  "Content-Type": "application/json",
-                  Accept: "application/json",
-                },
-              }
-            );
-
-            clearTimeout(timeout);
-
-            if (response.data.success) {
-              console.log("✅ Meal analysis successful");
-              return response.data;
-            }
-
-            throw new APIError(response.data.error || "Analysis failed");
-          } catch (axiosError: any) {
-            clearTimeout(timeout);
-            lastError = axiosError;
-
-            if (axios.isCancel(axiosError)) {
-              throw new APIError(
-                "Analysis timeout - please try again with a clearer image"
-              );
-            }
-
-            if (axiosError.code === "ECONNABORTED") {
-              throw new APIError(
-                "Connection timeout - please check your internet connection"
-              );
-            }
-
-            // If this is a network error and we have retries left, continue to next attempt
-            if (
-              attempt < MAX_RETRIES &&
-              (axiosError.code === "ERR_NETWORK" ||
-                axiosError.message?.includes("Network Error") ||
-                axiosError.response?.status >= 500)
-            ) {
-              console.log(
-                `⚠️ Network error on attempt ${attempt + 1}, retrying...`
-              );
-              // Wait before retry with exponential backoff
-              await new Promise((resolve) =>
-                setTimeout(resolve, Math.pow(2, attempt) * 1000)
-              );
-              continue;
-            }
-
-            throw axiosError;
-          }
-        } catch (error) {
-          lastError = error;
-
-          // If this is the last attempt or not a retryable error, break
-          if (attempt === MAX_RETRIES || !this.isRetryableError(error)) {
-            break;
-          }
-
-          console.log(
-            `⚠️ Retryable error on attempt ${attempt + 1}, retrying...`
-          );
-          await new Promise((resolve) =>
-            setTimeout(resolve, Math.pow(2, attempt) * 1000)
-          );
-        }
-      }
-
-      // If we get here, all retries failed
-      throw lastError;
-    } catch (error: any) {
-      console.error("💥 Meal analysis error:", error);
-      if (error instanceof APIError) throw error;
-
-      if (error.response?.status === 408) {
-        throw new APIError(
-          "Analysis is taking too long. Please try with a clearer image."
-        );
-      }
-
-      if (error.response?.data?.error) {
-        throw new APIError(error.response.data.error);
-      }
-
-      throw new APIError(
-        "Network error during meal analysis. Please check your connection and try again.",
-        undefined,
-        undefined,
-        true
-      );
+    if (!imageBase64?.trim()) {
+      throw new APIError("Image data is required");
     }
+
+    // No caching for meal analysis - always fresh
+    const response = await api.post(
+      "/nutrition/analyze",
+      {
+        imageBase64: imageBase64.trim(),
+        updateText,
+        editedIngredients,
+        language,
+        mealPeriod,
+      },
+      {
+        timeout: 30000, // 30s timeout
+      }
+    );
+
+    if (!response.data.success) {
+      throw new APIError(response.data.error || "Analysis failed");
+    }
+    return response.data;
   },
 
-  // Helper method to determine if an error is retryable
   isRetryableError(error: any): boolean {
-    if (!error) return false;
-
-    // Network errors are retryable
-    if (
+    return (
       error.code === "ERR_NETWORK" ||
-      error.message?.includes("Network Error")
-    ) {
-      return true;
-    }
-
-    // Server errors (5xx) are retryable
-    if (error.response?.status >= 500) {
-      return true;
-    }
-
-    // Timeout errors are retryable
-    if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
-      return true;
-    }
-
-    return false;
+      error.message?.includes("Network Error") ||
+      error.response?.status >= 500 ||
+      error.code === "ECONNABORTED"
+    );
   },
 
   async addShoppingItem(
@@ -563,120 +459,94 @@ export const nutritionAPI = {
     unit: string = "pieces",
     category: string = "Manual"
   ): Promise<any> {
-    try {
-      console.log("📦 Adding shopping item optimized...");
-      const response = await api.post("/shopping-lists", {
-        name: name.trim(),
-        quantity: quantity,
-        unit: unit,
-        category: category,
-        added_from: "manual",
-      });
+    const response = await api.post("/shopping-lists", {
+      name: name.trim(),
+      quantity,
+      unit,
+      category,
+      added_from: "manual",
+    });
 
-      if (response.data.success) {
-        console.log("✅ Shopping item added successfully");
-        return response.data;
-      }
-
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to add item");
-    } catch (error) {
-      console.error("💥 Add shopping item error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError(
-        "Network error while adding item",
-        undefined,
-        undefined,
-        true
-      );
     }
+    return response.data;
   },
 
   async saveMeal(
     mealData: MealAnalysisData,
     imageBase64?: string
   ): Promise<any> {
-    try {
-      console.log("🔄 Saving meal...");
-      const response = await api.post("/nutrition/save", {
-        mealData,
-        imageBase64,
-      });
+    const response = await api.post("/nutrition/save", {
+      mealData,
+      imageBase64,
+    });
 
-      if (response.data.success) {
-        console.log("✅ Meal saved successfully");
-        return response.data.data;
-      }
-
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to save meal");
-    } catch (error) {
-      console.error("💥 Save meal error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError(
-        "Network error while saving meal",
-        undefined,
-        undefined,
-        true
-      );
     }
+
+    // Invalidate meals cache
+    Array.from(responseCache.keys())
+      .filter((key) => key.includes("/nutrition/meals"))
+      .forEach((key) => responseCache.delete(key));
+
+    return response.data.data;
   },
 
   async getMeals(offset: number = 0, limit: number = 100): Promise<any[]> {
-    try {
-      console.log("🔄 Fetching meals...");
+    const cacheKey = getCacheKey("GET", "/nutrition/meals", { offset, limit });
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
+
+    return deduplicateRequest(cacheKey, async () => {
       const response = await api.get(
         `/nutrition/meals?offset=${offset}&limit=${limit}`
       );
-
-      if (response.data.success) {
-        console.log(`✅ Fetched ${response.data.data.length} meals`);
-        return response.data.data;
+      if (!response.data.success) {
+        throw new APIError(response.data.error || "Failed to fetch meals");
       }
-
-      throw new APIError(response.data.error || "Failed to fetch meals");
-    } catch (error) {
-      console.error("💥 Get meals error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError(
-        "Network error while fetching meals",
-        undefined,
-        undefined,
-        true
-      );
-    }
+      setCachedResponse(cacheKey, response.data.data, 60000); // 1 min cache
+      return response.data.data;
+    });
   },
 
   async updateMeal(mealId: string, updateText: string): Promise<any> {
-    try {
-      console.log("🔄 Updating meal...");
-      const response = await api.put("/nutrition/update", {
-        meal_id: mealId,
-        updateText,
-      });
+    const response = await api.put("/nutrition/update", {
+      meal_id: mealId,
+      updateText,
+    });
 
-      if (response.data.success) {
-        console.log("✅ Meal updated successfully");
-        return response.data;
-      }
-
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to update meal");
-    } catch (error) {
-      console.error("💥 Update meal error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError(
-        "Network error while updating meal",
-        undefined,
-        undefined,
-        true
-      );
     }
+
+    // Invalidate cache
+    responseCache.clear();
+    return response.data;
   },
 
   async getDailyStats(date: string): Promise<any> {
+    const cacheKey = getCacheKey("GET", "/nutrition/stats/daily", { date });
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
+
     try {
       const response = await api.get(`/nutrition/stats/daily?date=${date}`);
-      return response.data.success ? response.data.data : {};
+      const data = response.data.success
+        ? response.data.data
+        : {
+            calories: 0,
+            protein: 0,
+            carbs: 0,
+            fat: 0,
+            fiber: 0,
+            sugar: 0,
+            meal_count: 0,
+          };
+      setCachedResponse(cacheKey, data, 60000); // 1 min cache
+      return data;
     } catch (error) {
-      console.error("💥 Get daily stats error:", error);
       return {
         calories: 0,
         protein: 0,
@@ -690,210 +560,133 @@ export const nutritionAPI = {
   },
 
   async getRangeStatistics(startDate: string, endDate: string): Promise<any> {
-    try {
-      const { requestDeduplicator, createRequestKey } = await import(
-        "@/src/utils/requestDeduplication"
-      );
-      const requestKey = createRequestKey("GET", "/nutrition/stats/range", {
-        startDate,
-        endDate,
+    const cacheKey = getCacheKey("GET", "/nutrition/stats/range", {
+      startDate,
+      endDate,
+    });
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
+
+    return deduplicateRequest(cacheKey, async () => {
+      const response = await api.get("/nutrition/stats/range", {
+        params: { startDate, endDate },
+        timeout: 20000,
       });
-
-      return requestDeduplicator.deduplicate(requestKey, async () => {
-        console.log(
-          `📊 Making statistics API call: ${startDate} to ${endDate}`
-        );
-        const response = await api.get("/nutrition/stats/range", {
-          params: { startDate, endDate },
-          timeout: 35000, // 35 second timeout
-        });
-        return response.data;
-      });
-    } catch (error: any) {
-      console.error("💥 Range statistics error:", error);
-
-      if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
-        throw new APIError(
-          "Statistics request timed out. Please try again with a shorter time period.",
-          408,
-          "TIMEOUT",
-          true
-        );
-      }
-
-      if (error instanceof APIError) throw error;
-      throw new APIError(
-        "Network error while fetching statistics",
-        undefined,
-        undefined,
-        true
-      );
-    }
+      setCachedResponse(cacheKey, response.data, 300000); // 5 min cache
+      return response.data;
+    });
   },
 
   async saveMealFeedback(mealId: string, feedback: any): Promise<any> {
-    try {
-      const response = await api.post(
-        `/nutrition/meals/${mealId}/feedback`,
-        feedback
-      );
-      return response.data;
-    } catch (error) {
-      console.error("💥 Save feedback error:", error);
-      throw new APIError("Failed to save meal feedback");
-    }
+    const response = await api.post(
+      `/nutrition/meals/${mealId}/feedback`,
+      feedback
+    );
+    return response.data;
   },
 
   async toggleMealFavorite(mealId: string): Promise<any> {
-    try {
-      const response = await api.post(`/nutrition/meals/${mealId}/favorite`);
-      return response.data;
-    } catch (error) {
-      console.error("💥 Toggle favorite error:", error);
-      throw new APIError("Failed to toggle meal favorite");
-    }
+    const response = await api.post(`/nutrition/meals/${mealId}/favorite`);
+    responseCache.clear();
+    return response.data;
   },
 
   async duplicateMeal(mealId: string, newDate?: string): Promise<any> {
-    try {
-      const response = await api.post(`/nutrition/meals/${mealId}/duplicate`, {
-        newDate: newDate || new Date().toISOString().split("T")[0],
-      });
-      return response.data;
-    } catch (error) {
-      console.error("💥 Duplicate meal error:", error);
-      throw new APIError("Failed to duplicate meal");
-    }
+    const response = await api.post(`/nutrition/meals/${mealId}/duplicate`, {
+      newDate: newDate || new Date().toISOString().split("T")[0],
+    });
+    responseCache.clear();
+    return response.data;
   },
 
   async removeMeal(mealId: string): Promise<void> {
-    try {
-      await api.delete(`/nutrition/meals/${mealId}`);
-      console.log("✅ Meal removed successfully");
-    } catch (error) {
-      console.error("💥 Remove meal error:", error);
-      throw new APIError("Failed to remove meal");
-    }
+    await api.delete(`/nutrition/meals/${mealId}`);
+    responseCache.clear();
   },
 
   async getUsageStats(): Promise<any> {
-    try {
-      console.log("📊 Fetching usage stats...");
-      const response = await api.get("/nutrition/usage-stats");
+    const cacheKey = getCacheKey("GET", "/nutrition/usage-stats");
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
 
+    try {
+      const response = await api.get("/nutrition/usage-stats");
       if (response.data.success) {
-        console.log("✅ Usage stats fetched successfully");
+        setCachedResponse(cacheKey, response.data.data, 300000);
         return response.data.data;
       }
-
-      throw new APIError(response.data.error || "Failed to fetch usage stats");
     } catch (error) {
-      console.error("💥 Get usage stats error:", error);
-      return {
-        meal_scans_used: 0,
-        meal_scans_limit: 100,
-        ai_requests_used: 0,
-        ai_requests_limit: 1000,
-      };
+      // Return default
     }
+
+    return {
+      meal_scans_used: 0,
+      meal_scans_limit: 100,
+      ai_requests_used: 0,
+      ai_requests_limit: 1000,
+    };
   },
 
   async trackWaterIntake(cups: number, date?: string): Promise<any> {
-    try {
-      console.log("💧 Tracking water intake...");
-      const response = await api.post("/nutrition/water-intake", {
-        cups_consumed: cups,
-        date: date || new Date().toISOString().split("T")[0],
-      });
+    const response = await api.post("/nutrition/water-intake", {
+      cups_consumed: cups,
+      date: date || new Date().toISOString().split("T")[0],
+    });
 
-      if (response.data.success) {
-        console.log("✅ Water intake tracked successfully");
-        return response.data;
-      }
-
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to track water intake");
-    } catch (error) {
-      console.error("💥 Track water intake error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError(
-        "Network error while tracking water intake",
-        undefined,
-        undefined,
-        true
-      );
     }
+
+    // Invalidate water cache
+    Array.from(responseCache.keys())
+      .filter((key) => key.includes("/nutrition/water-intake"))
+      .forEach((key) => responseCache.delete(key));
+
+    return response.data;
   },
 
   async getWaterIntake(date: string): Promise<any> {
-    try {
-      console.log("💧 Fetching water intake for date:", date);
-      const response = await api.get(`/nutrition/water-intake/${date}`);
+    const cacheKey = getCacheKey("GET", `/nutrition/water-intake/${date}`);
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
 
+    try {
+      const response = await api.get(`/nutrition/water-intake/${date}`);
       if (response.data.success) {
-        console.log("✅ Water intake fetched successfully");
+        setCachedResponse(cacheKey, response.data.data, 30000);
         return response.data.data;
       }
-
-      return { cups_consumed: 0, milliliters_consumed: 0 };
     } catch (error) {
-      console.error("💥 Get water intake error:", error);
-      return { cups_consumed: 0, milliliters_consumed: 0 };
+      // Return default
     }
+
+    return { cups_consumed: 0, milliliters_consumed: 0 };
   },
 
-  async addManualMeal(mealData: {
-    mealName: string;
-    calories: string;
-    protein?: string;
-    carbs?: string;
-    fat?: string;
-    fiber?: string;
-    sugar?: string;
-    sodium?: string;
-    ingredients?: string[];
-    mealPeriod?: string;
-    imageUrl?: string;
-    date?: string;
-  }): Promise<any> {
-    try {
-      console.log("📝 Adding manual meal...");
-      const response = await api.post("/nutrition/meals/manual", mealData);
-
-      if (response.data.success) {
-        console.log("✅ Manual meal added successfully");
-        return response;
-      }
-
+  async addManualMeal(mealData: any): Promise<any> {
+    const response = await api.post("/nutrition/meals/manual", mealData);
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to add manual meal");
-    } catch (error) {
-      console.error("💥 Add manual meal error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError(
-        "Network error while adding manual meal",
-        undefined,
-        undefined,
-        true
-      );
     }
+    responseCache.clear();
+    return response;
   },
 };
 
-// Enhanced user API
+// ==================== USER API ====================
+
 export const userAPI = {
   async updateProfile(profileData: any): Promise<any> {
-    try {
-      const response = await api.put("/user/profile", profileData);
-      return response.data;
-    } catch (error) {
-      console.error("💥 Update profile error:", error);
-      throw new APIError("Failed to update profile");
-    }
+    const response = await api.put("/user/profile", profileData);
+    responseCache.clear();
+    return response.data;
   },
 
   updateSubscription: async (subscriptionType: string) => {
     const response = await api.put("/user/subscription", {
       subscription_type: subscriptionType,
     });
+    responseCache.clear();
     return response.data;
   },
 
@@ -903,358 +696,223 @@ export const userAPI = {
   },
 
   requestPasswordChange: async () => {
-    try {
-      const response = await api.post("/user/request-password-change");
-      return response.data;
-    } catch (error) {
-      console.error("💥 Request password change error:", error);
-      throw new APIError("Failed to request password change");
-    }
+    const response = await api.post("/user/request-password-change");
+    return response.data;
   },
 
   changePassword: async (verificationCode: string, newPassword: string) => {
-    try {
-      const response = await api.post("/user/change-password", {
-        verificationCode,
-        newPassword,
-      });
-      return response.data;
-    } catch (error) {
-      console.error("💥 Change password error:", error);
-      throw new APIError("Failed to change password");
-    }
+    const response = await api.post("/user/change-password", {
+      verificationCode,
+      newPassword,
+    });
+    return response.data;
   },
 
   getUserProfile: async (): Promise<any> => {
-    try {
-      const response = await api.get("/user/profile");
-      if (response.data.success) {
-        return {
-          success: true,
-          data: response.data.data,
-        };
-      }
+    const cacheKey = getCacheKey("GET", "/user/profile");
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
+
+    const response = await api.get("/user/profile");
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to fetch profile");
-    } catch (error) {
-      console.error("Get profile error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while fetching profile");
     }
+
+    const result = {
+      success: true,
+      data: response.data.data,
+    };
+    setCachedResponse(cacheKey, result, 300000);
+    return result;
   },
 
   getUserStats: async (): Promise<any> => {
+    const cacheKey = getCacheKey("GET", "/user/stats");
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
+
     try {
-      console.log("🔄 Fetching user stats...");
-      const response = await api.get("/user/stats", { timeout: 8000 });
+      const response = await api.get("/user/stats", { timeout: 5000 });
       if (response.data.success) {
-        console.log("✅ User stats fetched successfully");
+        setCachedResponse(cacheKey, response.data.data, 60000);
         return response.data.data;
       }
-      throw new APIError(response.data.error || "Failed to fetch user stats");
-    } catch (error: any) {
-      console.error("💥 Error fetching user stats:", error);
-      // Return default stats if API fails
-      const defaultStats = {
-        totalMeals: 0,
-        todayWaterIntake: 0,
-        totalAchievements: 0,
-        streak: 0,
-        memberSince: new Date(),
-        subscriptionType: "free",
-        questionnaireCompleted: false,
-      };
-      console.log("📊 Returning default user stats");
-      return defaultStats;
+    } catch (error) {
+      // Return defaults
     }
+
+    return {
+      totalMeals: 0,
+      todayWaterIntake: 0,
+      totalAchievements: 0,
+      streak: 0,
+      memberSince: new Date(),
+      subscriptionType: "free",
+      questionnaireCompleted: false,
+    };
   },
 
   async uploadAvatar(base64Image: string): Promise<any> {
-    try {
-      console.log("🔄 Uploading avatar...");
-      const response = await api.post("/user/avatar", {
-        avatar_base64: base64Image,
-      });
-
-      if (response.data.success) {
-        console.log("✅ Avatar uploaded successfully");
-        return response.data;
-      }
-
+    const response = await api.post("/user/avatar", {
+      avatar_base64: base64Image,
+    });
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to upload avatar");
-    } catch (error) {
-      console.error("💥 Upload avatar error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while uploading avatar");
     }
+    responseCache.clear();
+    return response.data;
   },
 
   async getGlobalStatistics(): Promise<any> {
-    try {
-      const response = await api.get("/user/global-statistics");
-      return response.data;
-    } catch (error) {
-      console.error("💥 Get global statistics error:", error);
-      throw new APIError("Failed to get global statistics");
-    }
+    const response = await api.get("/user/global-statistics");
+    return response.data;
   },
+
   async getAIRecommendations(): Promise<any> {
-    try {
-      const response = await api.get("/recommendations/today");
-      console.log(response.data);
-      return response.data;
-    } catch (error) {
-      console.error("Failed to fetch AI recommendations:", error);
-      throw error; // Re-throw so calling code can handle it
-    }
+    const cacheKey = getCacheKey("GET", "/recommendations/today");
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
+
+    const response = await api.get("/recommendations/today");
+    setCachedResponse(cacheKey, response.data, 300000);
+    return response.data;
   },
+
   async forgotPassword(email: string): Promise<any> {
-    try {
-      console.log("🔄 Sending forgot password request...");
-      const response = await api.post("/auth/forgot-password", { email });
-
-      if (response.data.success) {
-        console.log("✅ Forgot password email sent");
-        return response.data;
-      }
-
+    const response = await api.post("/auth/forgot-password", { email });
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to send reset email");
-    } catch (error) {
-      console.error("💥 Forgot password error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error during password reset request");
     }
+    return response.data;
   },
 
   async verifyResetCode(email: string, code: string): Promise<any> {
-    try {
-      console.log("🔄 Verifying reset code...");
-      const response = await api.post("/auth/verify-reset-code", {
-        email,
-        code,
-      });
-
-      if (response.data.success) {
-        console.log("✅ Reset code verified");
-        return response.data;
-      }
-
+    const response = await api.post("/auth/verify-reset-code", { email, code });
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Invalid reset code");
-    } catch (error) {
-      console.error("💥 Verify reset code error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error during code verification");
     }
+    return response.data;
   },
 
   async resetPassword(token: string, newPassword: string): Promise<any> {
-    try {
-      console.log("🔄 Resetting password...");
-      const response = await api.post("/auth/reset-password", {
-        token,
-        newPassword,
-      });
-
-      if (response.data.success) {
-        console.log("✅ Password reset successful");
-        return response.data;
-      }
-
+    const response = await api.post("/auth/reset-password", {
+      token,
+      newPassword,
+    });
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to reset password");
-    } catch (error) {
-      console.error("💥 Reset password error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error during password reset");
     }
+    return response.data;
   },
 };
 
-// Enhanced questionnaire API
+// ==================== QUESTIONNAIRE API ====================
+
 export const questionnaireAPI = {
   async saveQuestionnaire(data: QuestionnaireData): Promise<any> {
-    try {
-      console.log("🔄 Saving questionnaire...");
-      const response = await api.post("/questionnaire", data);
-
-      if (response.data.success) {
-        console.log("✅ Questionnaire saved successfully");
-        return response.data;
-      }
-
+    const response = await api.post("/questionnaire", data);
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to save questionnaire");
-    } catch (error) {
-      console.error("💥 Save questionnaire error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while saving questionnaire");
     }
+    return response.data;
   },
 
   async getQuestionnaire(): Promise<any> {
-    try {
-      const response = await api.get("/questionnaire");
-      return response.data;
-    } catch (error) {
-      console.error("💥 Get questionnaire error:", error);
-      throw new APIError("Failed to get questionnaire");
-    }
+    const response = await api.get("/questionnaire");
+    return response.data;
   },
 };
 
-// Enhanced chat API
+// ==================== CHAT API ====================
+
 export const chatAPI = {
   async sendMessage(
     message: string,
     language: string = "hebrew"
   ): Promise<any> {
-    try {
-      console.log("🔄 Sending chat message...");
-
-      if (!message || message.trim() === "") {
-        throw new APIError("Message cannot be empty");
-      }
-
-      const response = await api.post("/chat/message", {
-        message: message.trim(),
-        language,
-      });
-
-      if (response.data.success) {
-        console.log("✅ Chat message sent successfully");
-        return response.data;
-      }
-
-      throw new APIError(response.data.error || "Failed to send message");
-    } catch (error) {
-      console.error("💥 Chat message error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while sending message");
+    if (!message?.trim()) {
+      throw new APIError("Message cannot be empty");
     }
+
+    const response = await api.post("/chat/message", {
+      message: message.trim(),
+      language,
+    });
+
+    if (!response.data.success) {
+      throw new APIError(response.data.error || "Failed to send message");
+    }
+    return response.data;
   },
 
   async getChatHistory(limit: number = 50): Promise<any> {
+    const cacheKey = getCacheKey("GET", "/chat/history", { limit });
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
+
     try {
       const response = await api.get(`/chat/history?limit=${limit}`);
+      setCachedResponse(cacheKey, response.data, 60000);
       return response.data;
     } catch (error) {
-      console.error("💥 Get chat history error:", error);
       return { success: false, data: [] };
     }
   },
 
   async clearHistory(): Promise<any> {
-    try {
-      const response = await api.delete("/chat/history");
-      return response.data;
-    } catch (error) {
-      console.error("💥 Clear chat history error:", error);
-      throw new APIError("Failed to clear chat history");
-    }
+    const response = await api.delete("/chat/history");
+    responseCache.clear();
+    return response.data;
   },
 };
 
-// Enhanced calendar API
+// ==================== CALENDAR API ====================
+
 export const calendarAPI = {
   async getCalendarData(year: number, month: number): Promise<any> {
-    try {
-      console.log(`📅 Fetching calendar data for ${year}/${month}`);
-      const response = await api.get(`/calendar/data/${year}/${month}`, {
-        timeout: 15000,
+    const cacheKey = getCacheKey("GET", `/calendar/data/${year}/${month}`);
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
+
+    return throttleRequest(async () => {
+      return deduplicateRequest(cacheKey, async () => {
+        const response = await api.get(`/calendar/data/${year}/${month}`, {
+          timeout: 10000,
+        });
+
+        if (!response.data.success) {
+          throw new APIError(
+            response.data.error || "Failed to fetch calendar data"
+          );
+        }
+
+        const data = response.data.data || {};
+        setCachedResponse(cacheKey, data, 300000); // 5 min cache
+        return data;
       });
-
-      if (response.data.success) {
-        console.log(
-          "✅ Calendar data fetched:",
-          Object.keys(response.data.data || {}).length,
-          "days"
-        );
-        return response.data.data || {};
-      }
-
-      throw new APIError(
-        response.data.error || "Failed to fetch calendar data"
-      );
-    } catch (error: any) {
-      console.error("💥 Get calendar data error:", error);
-
-      if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
-        throw new APIError(
-          "Calendar data request timed out. Please check your connection.",
-          408,
-          "TIMEOUT",
-          true
-        );
-      }
-
-      if (
-        error.code === "ERR_NETWORK" ||
-        error.message?.includes("Network Error")
-      ) {
-        throw new APIError(
-          "Network error while loading calendar. Please check your connection.",
-          undefined,
-          "NETWORK_ERROR",
-          true
-        );
-      }
-
-      if (error instanceof APIError) throw error;
-
-      throw new APIError(
-        "Failed to load calendar data",
-        undefined,
-        undefined,
-        true
-      );
-    }
+    });
   },
 
   async getStatistics(year: number, month: number): Promise<any> {
-    try {
-      console.log(`📊 Fetching calendar statistics for ${year}/${month}`);
+    const cacheKey = getCacheKey(
+      "GET",
+      `/calendar/statistics/${year}/${month}`
+    );
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
+
+    return deduplicateRequest(cacheKey, async () => {
       const response = await api.get(`/calendar/statistics/${year}/${month}`, {
-        timeout: 15000,
+        timeout: 10000,
       });
 
-      if (response.data.success) {
-        console.log("✅ Calendar statistics fetched successfully");
-        return response.data.data;
+      if (!response.data.success) {
+        throw new APIError(response.data.error || "Failed to fetch statistics");
       }
 
-      throw new APIError(
-        response.data.error || "Failed to fetch calendar statistics"
-      );
-    } catch (error: any) {
-      console.error("💥 Get calendar statistics error:", error);
-
-      if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
-        throw new APIError(
-          "Statistics request timed out",
-          408,
-          "TIMEOUT",
-          true
-        );
-      }
-
-      if (
-        error.code === "ERR_NETWORK" ||
-        error.message?.includes("Network Error")
-      ) {
-        throw new APIError(
-          "Network error while loading statistics",
-          undefined,
-          "NETWORK_ERROR",
-          true
-        );
-      }
-
-      if (error instanceof APIError) throw error;
-
-      throw new APIError(
-        "Failed to load statistics",
-        undefined,
-        undefined,
-        true
-      );
-    }
+      setCachedResponse(cacheKey, response.data.data, 300000);
+      return response.data.data;
+    });
   },
 
   async addEvent(
@@ -1263,23 +921,22 @@ export const calendarAPI = {
     type: string,
     description?: string
   ): Promise<any> {
-    try {
-      const response = await api.post("/calendar/events", {
-        date,
-        title,
-        type,
-        description,
-      });
-      if (response.data.success) {
-        return response.data.data;
-      }
+    const response = await api.post("/calendar/events", {
+      date,
+      title,
+      type,
+      description,
+    });
+    if (!response.data.success) {
       throw new APIError("Failed to add event");
-    } catch (error) {
-      console.error("💥 Add event error:", error);
-      throw error instanceof APIError
-        ? error
-        : new APIError("Failed to add event");
     }
+
+    // Invalidate calendar cache
+    Array.from(responseCache.keys())
+      .filter((key) => key.includes("/calendar/"))
+      .forEach((key) => responseCache.delete(key));
+
+    return response.data.data;
   },
 
   async getEventsForDate(date: string): Promise<any[]> {
@@ -1287,177 +944,125 @@ export const calendarAPI = {
       const response = await api.get(`/calendar/events/${date}`);
       return response.data.success ? response.data.data : [];
     } catch (error) {
-      console.error("💥 Get events error:", error);
       return [];
     }
   },
 
   async deleteEvent(eventId: string): Promise<void> {
-    try {
-      await api.delete(`/calendar/events/${eventId}`);
-      console.log("✅ Event deleted successfully");
-    } catch (error) {
-      console.error("💥 Delete event error:", error);
-      throw new APIError("Failed to delete event");
-    }
+    await api.delete(`/calendar/events/${eventId}`);
+    responseCache.clear();
   },
 
   async getEnhancedStatistics(year: number, month: number): Promise<any> {
-    try {
-      console.log(
-        `📊 Fetching enhanced calendar statistics for ${year}/${month}`
-      );
-      const response = await api.get(
-        `/calendar/statistics/enhanced/${year}/${month}`,
-        {
-          timeout: 20000,
-        }
-      );
+    const cacheKey = getCacheKey(
+      "GET",
+      `/calendar/statistics/enhanced/${year}/${month}`
+    );
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
 
-      if (response.data.success) {
-        console.log("✅ Enhanced calendar statistics fetched successfully");
-        return response.data.data;
+    const response = await api.get(
+      `/calendar/statistics/enhanced/${year}/${month}`,
+      {
+        timeout: 15000,
       }
+    );
 
+    if (!response.data.success) {
       throw new APIError(
         response.data.error || "Failed to fetch enhanced statistics"
       );
-    } catch (error: any) {
-      console.error("💥 Get enhanced calendar statistics error:", error);
-
-      if (error.code === "ECONNABORTED" || error.message?.includes("timeout")) {
-        throw new APIError(
-          "Enhanced statistics request timed out",
-          408,
-          "TIMEOUT",
-          true
-        );
-      }
-
-      if (
-        error.code === "ERR_NETWORK" ||
-        error.message?.includes("Network Error")
-      ) {
-        throw new APIError(
-          "Network error while loading enhanced statistics",
-          undefined,
-          "NETWORK_ERROR",
-          true
-        );
-      }
-
-      if (error instanceof APIError) throw error;
-
-      throw new APIError(
-        "Failed to load enhanced statistics",
-        undefined,
-        undefined,
-        true
-      );
     }
+
+    setCachedResponse(cacheKey, response.data.data, 300000);
+    return response.data.data;
   },
 };
 
-// Enhanced meal API
+// ==================== MEAL API ====================
+
 export const mealAPI = {
   async deleteMeal(mealId: string): Promise<void> {
-    try {
-      console.log("🔄 Deleting meal:", mealId);
-      await api.delete(`/nutrition/meals/${mealId}`);
-      console.log("✅ Meal deleted successfully");
-    } catch (error) {
-      console.error("💥 Delete meal error:", error);
-      throw new APIError("Failed to delete meal");
-    }
+    await api.delete(`/nutrition/meals/${mealId}`);
+
+    // Invalidate meals cache
+    Array.from(responseCache.keys())
+      .filter((key) => key.includes("/nutrition/meals"))
+      .forEach((key) => responseCache.delete(key));
   },
 
   async updateMeal(mealId: string, updateData: any): Promise<any> {
-    try {
-      const response = await api.put(`/nutrition/meals/${mealId}`, updateData);
-      return response.data;
-    } catch (error) {
-      console.error("💥 Update meal error:", error);
-      throw new APIError("Failed to update meal");
-    }
+    const response = await api.put(`/nutrition/meals/${mealId}`, updateData);
+
+    // Invalidate meals cache
+    Array.from(responseCache.keys())
+      .filter((key) => key.includes("/nutrition/meals"))
+      .forEach((key) => responseCache.delete(key));
+
+    return response.data;
   },
 };
 
-// Enhanced meal plan API
+// ==================== MEAL PLAN API ====================
+
 export const mealPlanAPI = {
   async getCurrentMealPlan(): Promise<any> {
-    try {
-      console.log("🔄 Fetching current meal plan...");
+    const cacheKey = getCacheKey("GET", "/meal-plans/current");
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
+
+    return deduplicateRequest(cacheKey, async () => {
       const response = await api.get("/meal-plans/current");
-
-      if (response.data.success) {
-        console.log("✅ Current meal plan fetched successfully");
-        return response.data;
+      if (!response.data.success) {
+        throw new APIError(
+          response.data.error || "Failed to fetch current meal plan"
+        );
       }
-
-      throw new APIError(
-        response.data.error || "Failed to fetch current meal plan"
-      );
-    } catch (error) {
-      console.error("💥 Get current meal plan error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while fetching current meal plan");
-    }
+      setCachedResponse(cacheKey, response.data, 300000); // 5 min cache
+      return response.data;
+    });
   },
 
   async getMealPlanById(planId: string): Promise<any> {
-    try {
-      console.log("🔄 Fetching meal plan by ID:", planId);
-      const response = await api.get(`/meal-plans/${planId}`);
+    const cacheKey = getCacheKey("GET", `/meal-plans/${planId}`);
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
 
-      if (response.data.success) {
-        console.log("✅ Meal plan fetched successfully");
-        return response.data;
-      }
-
+    const response = await api.get(`/meal-plans/${planId}`);
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to fetch meal plan");
-    } catch (error) {
-      console.error("💥 Get meal plan by ID error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while fetching meal plan");
     }
+    setCachedResponse(cacheKey, response.data, 300000);
+    return response.data;
   },
 
   async getRecommendedMenus(): Promise<any> {
-    try {
-      console.log("🔄 Fetching recommended menus...");
-      const response = await api.get("/meal-plans/recommended");
+    const cacheKey = getCacheKey("GET", "/meal-plans/recommended");
+    const cached = getCachedResponse(cacheKey);
+    if (cached) return cached;
 
-      if (response.data.success) {
-        console.log("✅ Recommended menus fetched successfully");
-        return response.data;
-      }
-
+    const response = await api.get("/meal-plans/recommended");
+    if (!response.data.success) {
       throw new APIError(
         response.data.error || "Failed to fetch recommended menus"
       );
-    } catch (error) {
-      console.error("💥 Get recommended menus error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while fetching recommended menus");
     }
+    setCachedResponse(cacheKey, response.data, 600000); // 10 min cache
+    return response.data;
   },
 
   async activateMealPlan(planId: string): Promise<any> {
-    try {
-      console.log("🔄 Activating meal plan:", planId);
-      const response = await api.post(`/meal-plans/${planId}/activate`);
-
-      if (response.data.success) {
-        console.log("✅ Meal plan activated successfully");
-        return response.data;
-      }
-
+    const response = await api.post(`/meal-plans/${planId}/activate`);
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to activate meal plan");
-    } catch (error) {
-      console.error("💥 Activate meal plan error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while activating meal plan");
     }
+
+    // Invalidate meal plan cache
+    Array.from(responseCache.keys())
+      .filter((key) => key.includes("/meal-plans"))
+      .forEach((key) => responseCache.delete(key));
+
+    return response.data;
   },
 
   async replaceMealInPlan(
@@ -1466,89 +1071,95 @@ export const mealPlanAPI = {
     mealTiming: string,
     preferences: any
   ): Promise<any> {
-    try {
-      console.log("🔄 Replacing meal in plan...");
-      const response = await api.put(
-        `/meal-plans/${planId}/replace`,
-        {
-          day_of_week: dayOfWeek,
-          meal_timing: mealTiming,
-          meal_order: 0,
-          preferences: preferences,
-        },
-        {
-          timeout: 15000, // 15 second timeout for meal replacement
-        }
-      );
-
-      if (response.data.success) {
-        console.log("✅ Meal replaced successfully");
-        return response.data;
+    const response = await api.put(
+      `/meal-plans/${planId}/replace`,
+      {
+        day_of_week: dayOfWeek,
+        meal_timing: mealTiming,
+        meal_order: 0,
+        preferences: preferences,
+      },
+      {
+        timeout: 12000, // 12 second timeout
       }
+    );
 
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to replace meal");
-    } catch (error: any) {
-      console.error("💥 Replace meal error:", error);
-
-      if (error.response?.data?.error) {
-        throw new APIError(error.response.data.error);
-      }
-
-      if (error.code === "ECONNABORTED") {
-        throw new APIError("Request timeout - please try again");
-      }
-
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while replacing meal");
     }
+
+    // Invalidate meal plan cache
+    responseCache.delete(getCacheKey("GET", `/meal-plans/${planId}`));
+    responseCache.delete(getCacheKey("GET", "/meal-plans/current"));
+
+    return response.data;
   },
 
   async completeMealPlan(planId: string, feedback: any): Promise<any> {
-    try {
-      console.log("🔄 Completing meal plan...");
-      const response = await api.post(
-        `/meal-plans/${planId}/complete`,
-        feedback
-      );
-
-      if (response.data.success) {
-        console.log("✅ Meal plan completed successfully");
-        return response.data;
-      }
-
+    const response = await api.post(`/meal-plans/${planId}/complete`, feedback);
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to complete meal plan");
-    } catch (error) {
-      console.error("💥 Complete meal plan error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while completing meal plan");
     }
+    responseCache.clear();
+    return response.data;
   },
 
-  // Added swapMeal method
   async swapMeal(planId: string, swapRequest: any): Promise<any> {
-    try {
-      console.log("🔄 Swapping meal in plan...");
-      const response = await api.post(
-        `/meal-plans/${planId}/swap-meal`,
-        swapRequest
-      );
-
-      if (response.data.success) {
-        console.log("✅ Meal swapped successfully");
-        return response.data;
-      }
-
+    const response = await api.post(
+      `/meal-plans/${planId}/swap-meal`,
+      swapRequest
+    );
+    if (!response.data.success) {
       throw new APIError(response.data.error || "Failed to swap meal");
-    } catch (error) {
-      console.error("💥 Swap meal error:", error);
-      if (error instanceof APIError) throw error;
-      throw new APIError("Network error while swapping meal");
     }
+
+    // Invalidate meal plan cache
+    responseCache.delete(getCacheKey("GET", `/meal-plans/${planId}`));
+    responseCache.delete(getCacheKey("GET", "/meal-plans/current"));
+
+    return response.data;
   },
 };
 
-// Export the main API instance for direct use
+// ==================== UTILITY FUNCTIONS ====================
+
+// Clear all cache (useful for logout or data refresh)
+export const clearCache = (): void => {
+  responseCache.clear();
+  cachedToken = null;
+  tokenCacheTimestamp = 0;
+};
+
+// Prefetch data for better UX
+export const prefetchData = {
+  async dailyGoals(): Promise<void> {
+    dailyGoalsAPI.getDailyGoals().catch(console.error);
+  },
+
+  async todayStats(): Promise<void> {
+    const today = new Date().toISOString().split("T")[0];
+    nutritionAPI.getDailyStats(today).catch(console.error);
+  },
+
+  async userProfile(): Promise<void> {
+    userAPI.getUserProfile().catch(console.error);
+  },
+
+  async allHomeScreenData(): Promise<void> {
+    // Prefetch all data needed for home screen in parallel
+    Promise.all([
+      this.dailyGoals(),
+      this.todayStats(),
+      nutritionAPI.getMeals(0, 10),
+      userAPI.getUserStats(),
+    ]).catch(console.error);
+  },
+};
+
+// Export main API instance
 export { api };
 
-// Export error class for error handling
+// Export error class
 export { APIError };
+
+// Export cache utilities

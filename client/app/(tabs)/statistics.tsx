@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect} from "react";
 import {
   View,
   Text,
@@ -13,7 +13,6 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
-import { BlurView } from "expo-blur";
 import Svg, {
   Circle,
   Path,
@@ -959,6 +958,7 @@ export default function StatisticsScreen() {
     } finally {
       setIsLoading(false);
     }
+    console.log(statisticsData)
   };
 
   useEffect(() => {
@@ -2562,7 +2562,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     borderRadius: 24,
     padding: 4,
-   
   },
   timeFilterButton: {
     flex: 1,
